@@ -125,3 +125,14 @@ function verifyAdmin($username, $password) {
     }
     return false;
 }
+
+/**
+ * Get current user type from session
+ * @return string|null
+ */
+function getCurrentUserType() {
+    if (isset($_SESSION['user_type'])) {
+        return $_SESSION['user_type'];
+    }
+    return null;
+}

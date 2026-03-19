@@ -3,7 +3,7 @@
  * PlotConnect - Check Authentication API
  */
 
-require_once dirname(__DIR__, 2) . '/php/config.php';
+require_once dirname(__DIR__, 2) . '/config.php';
 
 $userType = getCurrentUserType();
 
