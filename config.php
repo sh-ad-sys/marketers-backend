@@ -6,23 +6,7 @@
  * NOTE: Secrets should be set via environment variables for security
  */
 
-// Start session
-if (session_status() === PHP_SESSION_NONE) {
-    // Set cookie parameters for cross-origin
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path' => '/',
-        'domain' => '.onrender.com',
-        'secure' => true,
-        'samesite' => 'None'
-    ]);
-    session_start();
-}
-
-// Load Hash class
-require_once __DIR__ . '/php/hash.php';
-
-// CORS headers - allow specific origins
+// CORS
 $allowedOrigins = [
     "http://localhost:3000",
     "https://marketers-l984.vercel.app"
@@ -30,8 +14,6 @@ $allowedOrigins = [
 
 if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $allowedOrigins)) {
     header("Access-Control-Allow-Origin: " . $_SERVER['HTTP_ORIGIN']);
-} else {
-    header("Access-Control-Allow-Origin: *");
 }
 
 header("Access-Control-Allow-Credentials: true");
@@ -41,20 +23,22 @@ header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 // Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
-    exit;
+    exit();
 }
 
-// JSON Response helper function
-function jsonResponse($success, $message = null, $data = null, $statusCode = 200) {
-    http_response_code($statusCode);
-    header('Content-Type: application/json');
-    echo json_encode([
-        'success' => $success,
-        'message' => $message,
-        'data' => $data
-    ]);
-    exit;
-}
+// SESSION CONFIG (MOST IMPORTANT)
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path' => '/',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'None'
+]);
+
+session_start();
+
+// Load Hash class
+require_once __DIR__ . '/php/hash.php';
 
 // Database credentials - use environment variables
 define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
@@ -126,8 +110,6 @@ define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '');
  * @return bool
  */
 function verifyAdmin($username, $password) {
-    require_once __DIR__ . '/php/hash.php';
-    
     if ($username === ADMIN_USERNAME && Hash::check($password, ADMIN_PASSWORD)) {
         return true;
     }
@@ -143,4 +125,18 @@ function getCurrentUserType() {
         return $_SESSION['user_type'];
     }
     return null;
+}
+
+/**
+ * JSON Response helper function
+ */
+function jsonResponse($success, $message = null, $data = null, $statusCode = 200) {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => $success,
+        'message' => $message,
+        'data' => $data
+    ]);
+    exit;
 }
