@@ -8,6 +8,14 @@
 
 // Start session
 if (session_status() === PHP_SESSION_NONE) {
+    // Set cookie parameters for cross-origin
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '.onrender.com',
+        'secure' => true,
+        'samesite' => 'None'
+    ]);
     session_start();
 }
 
