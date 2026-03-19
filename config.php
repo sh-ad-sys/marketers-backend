@@ -40,6 +40,13 @@ session_start();
 // Load Hash class
 require_once __DIR__ . '/php/hash.php';
 
+/**
+ * Sanitize input string
+ */
+function sanitize($input) {
+    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
+
 // Database credentials - use environment variables
 define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
 define('DB_PORT', getenv('DB_PORT') ?: '27258');
@@ -125,6 +132,20 @@ function getCurrentUserType() {
         return $_SESSION['user_type'];
     }
     return null;
+}
+
+/**
+ * Check if admin is logged in
+ */
+function isAdminLoggedIn() {
+    return getCurrentUserType() === 'admin';
+}
+
+/**
+ * Check if marketer is logged in
+ */
+function isMarketerLoggedIn() {
+    return getCurrentUserType() === 'marketer';
 }
 
 /**

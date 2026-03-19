@@ -3,7 +3,7 @@
  * PlotConnect - Admin Dashboard API
  */
 
-require_once dirname(__DIR__, 2) . '/php/config.php';
+require_once dirname(__DIR__, 2) . '/config.php';
 
 // Check if admin is logged in
 if (!isAdminLoggedIn()) {

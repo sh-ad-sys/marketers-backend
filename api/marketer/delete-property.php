@@ -3,7 +3,7 @@
  * PlotConnect - Marketer Delete Property API
  */
 
-require_once dirname(__DIR__, 2) . '/php/config.php';
+require_once dirname(__DIR__, 2) . '/config.php';
 
 // Check if marketer is logged in
 if (!isMarketerLoggedIn()) {
