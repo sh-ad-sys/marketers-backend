@@ -1,90 +1,89 @@
 <?php
 /**
- * PlotConnect - Backend Configuration
+ * Database Configuration for PlotConnect
+ * Aiven MySQL with SSL
  */
 
-// Database configuration
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'plotconnect');
+// Database credentials
+define('DB_HOST', 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
+define('DB_PORT', '27258');
+define('DB_NAME', 'defaultdb');
+define('DB_USER', 'avnadmin');
+define('DB_PASS', 'AVNS_StD64oqi1o1g51qGri5');
 
-// CORS headers for API
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json');
+// Admin credentials
+define('ADMIN_USERNAME', 'admin');
+define('ADMIN_PASSWORD', '$2y$10$CCS1vn1/1pH4s0Q6W0HBhOb9lqNUog8W0xmfiQqDE15j91CoGNFRO');
 
-// Handle preflight requests
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+// SSL Configuration
+define('DB_SSL_MODE', 'REQUIRED');
+define('DB_SSL_CA', '/plotconnect/ca.pem');
 
-// Start session
-session_start();
+// Service URI (DSN)
+$service_uri = sprintf(
+    'mysql://%s:%s@%s:%s/%s?ssl-mode=%s',
+    DB_USER,
+    DB_PASS,
+    DB_HOST,
+    DB_PORT,
+    DB_NAME,
+    DB_SSL_MODE
+);
 
-// Database connection
+// PDO options for SSL connection
+$pdo_options = [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+];
+
+/**
+ * Get PDO database connection
+ * @return PDO
+ */
 function getDBConnection() {
-    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+    static $pdo = null;
     
-    if ($conn->connect_error) {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-        exit();
+    if ($pdo === null) {
+        try {
+            $dsn = sprintf(
+                'mysql:host=%s;port=%s;dbname=%s;sslmode=%s',
+                DB_HOST,
+                DB_PORT,
+                DB_NAME,
+                DB_SSL_MODE
+            );
+            
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::MYSQL_ATTR_SSL_CA => DB_SSL_CA,
+                PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => true,
+            ];
+            
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            error_log('Database Connection Error: ' . $e->getMessage());
+            throw new Exception('Database connection failed. Please check your configuration.');
+        }
     }
     
-    return $conn;
+    return $pdo;
 }
 
-// Send JSON response
-function jsonResponse($success, $message, $data = null, $code = 200) {
-    http_response_code($code);
-    $response = [
-        'success' => $success,
-        'message' => $message
-    ];
-    
-    if ($data !== null) {
-        $response['data'] = $data;
-    }
-    
-    echo json_encode($response);
-    exit();
-}
-
-// Sanitize input
-function sanitize($input) {
-    global $conn;
-    if (is_array($input)) {
-        return array_map('sanitize', $input);
-    }
-    return htmlspecialchars(strip_tags(trim($input)), ENT_QUOTES, 'UTF-8');
-}
-
-// Hash password
-function hashPassword($password) {
-    return password_hash($password, PASSWORD_DEFAULT);
-}
-
-// Verify password
-function verifyPassword($password, $hash) {
-    return password_verify($password, $hash);
-}
-
-// Check if admin is logged in
-function isAdminLoggedIn() {
-    return isset($_SESSION['admin_id']);
-}
-
-// Check if marketer is logged in
-function isMarketerLoggedIn() {
-    return isset($_SESSION['marketer_id']);
-}
-
-// Get current user type
-function getCurrentUserType() {
-    if (isAdminLoggedIn()) return 'admin';
-    if (isMarketerLoggedIn()) return 'marketer';
-    return null;
+/**
+ * Get the service URI for reference
+ * @return string
+ */
+function getServiceURI() {
+    return sprintf(
+        'mysql://%s:%s@%s:%s/%s?ssl-mode=%s',
+        DB_USER,
+        DB_PASS,
+        DB_HOST,
+        DB_PORT,
+        DB_NAME,
+        DB_SSL_MODE
+    );
 }
