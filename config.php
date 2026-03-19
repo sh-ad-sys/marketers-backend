@@ -6,6 +6,22 @@
  * NOTE: Secrets should be set via environment variables for security
  */
 
+// Start session
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// CORS headers
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+// Handle preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
 // JSON Response helper function
 function jsonResponse($success, $message = null, $data = null, $statusCode = 200) {
     http_response_code($statusCode);
