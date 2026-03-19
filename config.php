@@ -76,7 +76,7 @@ define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '');
  * @return bool
  */
 function verifyAdmin($username, $password) {
-    require_once __DIR__ . '/hash.php';
+    require_once __DIR__ . '/php/hash.php';
     
     if ($username === ADMIN_USERNAME && Hash::check($password, ADMIN_PASSWORD)) {
         return true;
