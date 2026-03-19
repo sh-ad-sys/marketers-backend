@@ -1,113 +1,85 @@
 <?php
 /**
- * Database Configuration
+ * Database Configuration for PlotConnect
+ * Aiven MySQL with SSL
+ * 
+ * NOTE: Secrets should be set via environment variables for security
  */
 
-// CORS headers for cross-origin requests
-header("Access-Control-Allow-Origin: http://localhost:3000");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Credentials: true");
+// Database credentials - use environment variables
+define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
+define('DB_PORT', getenv('DB_PORT') ?: '27258');
+define('DB_NAME', getenv('DB_NAME') ?: 'defaultdb');
+define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
+define('DB_PASS', getenv('DB_PASS') ?: '');
 
-// Handle preflight requests
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+// SSL Configuration
+define('DB_SSL_MODE', 'REQUIRED');
+define('DB_SSL_CA', __DIR__ . '/ca.pem');
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'plotconnect');
-define('DB_USER', 'root');
-define('DB_PASS', 'Shadrack2024.');
-
-try {
-    $pdo = new PDO(
-        "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
+// Service URI (DSN) - constructed dynamically
+function getServiceURI() {
+    return sprintf(
+        'mysql://%s:%s@%s:%s/%s?ssl-mode=%s',
         DB_USER,
-        DB_PASS,
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false
-        ]
+        rawurlencode(DB_PASS),
+        DB_HOST,
+        DB_PORT,
+        DB_NAME,
+        DB_SSL_MODE
     );
-} catch (PDOException $e) {
-    http_response_code(500);
-    die(json_encode(['success' => false, 'message' => 'Database connection failed']));
 }
 
-// Session management
-session_start();
-
-function isLoggedIn() {
-    return isset($_SESSION['user_id']);
-}
-
-function getCurrentUser() {
-    if (!isLoggedIn()) return null;
-    return [
-        'id' => $_SESSION['user_id'],
-        'name' => $_SESSION['user_name'] ?? '',
-        'username' => $_SESSION['username'] ?? '',
-        'full_name' => $_SESSION['full_name'] ?? '',
-        'user_type' => $_SESSION['user_type'],
-        'phone' => $_SESSION['phone'] ?? ''
-    ];
-}
-
-function requireLogin() {
-    if (!isLoggedIn()) {
-        http_response_code(401);
-        die(json_encode(['success' => false, 'message' => 'Authentication required']));
-    }
-}
-
-function requireAdmin() {
-    requireLogin();
-    if ($_SESSION['user_type'] !== 'admin') {
-        http_response_code(403);
-        die(json_encode(['success' => false, 'message' => 'Admin access required']));
-    }
-}
-
-function isAdminLoggedIn() {
-    return isset($_SESSION['user_type']) && $_SESSION['user_type'] === 'admin';
-}
-
-function isMarketerLoggedIn() {
-    return isset($_SESSION['user_type']) && $_SESSION['user_type'] === 'marketer';
-}
-
-// Helper functions
+/**
+ * Get PDO database connection
+ * @return PDO
+ */
 function getDBConnection() {
-    global $pdo;
+    static $pdo = null;
+    
+    if ($pdo === null) {
+        try {
+            $dsn = sprintf(
+                'mysql:host=%s;port=%s;dbname=%s;sslmode=%s',
+                DB_HOST,
+                DB_PORT,
+                DB_NAME,
+                DB_SSL_MODE
+            );
+            
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::MYSQL_ATTR_SSL_CA => DB_SSL_CA,
+                PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => true,
+            ];
+            
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            error_log('Database Connection Error: ' . $e->getMessage());
+            throw new Exception('Database connection failed. Please check your configuration.');
+        }
+    }
+    
     return $pdo;
 }
 
-function sanitize($input) {
-    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
-}
+// Admin credentials - use environment variables
+define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
+define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '');
 
-function verifyPassword($password, $hash) {
-    return password_verify($password, $hash);
-}
-
-function jsonResponse($success, $message, $data = null, $statusCode = 200) {
-    http_response_code($statusCode);
-    $response = [
-        'success' => $success,
-        'message' => $message
-    ];
-    if ($data !== null) {
-        $response['data'] = $data;
+/**
+ * Verify admin credentials
+ * @param string $username
+ * @param string $password
+ * @return bool
+ */
+function verifyAdmin($username, $password) {
+    require_once __DIR__ . '/hash.php';
+    
+    if ($username === ADMIN_USERNAME && Hash::check($password, ADMIN_PASSWORD)) {
+        return true;
     }
-    echo json_encode($response);
-    exit;
-}
-
-function getCurrentUserType() {
-    if (isset($_SESSION['user_type'])) {
-        return $_SESSION['user_type'];
-    }
-    return null;
+    return false;
 }
