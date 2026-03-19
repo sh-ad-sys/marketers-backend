@@ -6,6 +6,18 @@
  * NOTE: Secrets should be set via environment variables for security
  */
 
+// JSON Response helper function
+function jsonResponse($success, $message = null, $data = null, $statusCode = 200) {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => $success,
+        'message' => $message,
+        'data' => $data
+    ]);
+    exit;
+}
+
 // Database credentials - use environment variables
 define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
 define('DB_PORT', getenv('DB_PORT') ?: '27258');
