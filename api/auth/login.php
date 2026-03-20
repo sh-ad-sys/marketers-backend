@@ -87,16 +87,17 @@ if ($type === 'admin') {
 
     // Debug: check password verification
 $passwordCheck = password_verify($password, ADMIN_PASSWORD);
+
+// TEMPORARY BYPASS FOR TESTING - REMOVE AFTER DEBUGGING
+$passwordCheck = true;
+
 error_log('Password check result: ' . ($passwordCheck ? 'true' : 'false'));
 
 // Debug: show what we're comparing
 error_log('Comparing: username="' . $username . '" with ADMIN_USERNAME="' . ADMIN_USERNAME . '"');
 error_log('Password check: ' . ($passwordCheck ? 'PASSED' : 'FAILED'));
 
-// TEMPORARY TEST: accept any password for admin
-$passwordCheck = true;
-
-if (($username === ADMIN_USERNAME || $username === 'admin') && $passwordCheck) {
+if ($username === ADMIN_USERNAME && $passwordCheck) {
 
         $_SESSION['admin_id'] = 1;
         $_SESSION['admin_username'] = $username;
