@@ -47,6 +47,9 @@ $type = $data['type'] ?? '';
 $username = $data['username'] ?? '';
 $password = $data['password'] ?? '';
 
+// Debug: log what was received
+error_log('Login attempt: type=' . $type . ', username=' . $username . ', password_len=' . strlen($password));
+
 if (empty($type) || empty($password)) {
     echo json_encode([
         "success" => false,
