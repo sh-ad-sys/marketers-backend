@@ -107,6 +107,13 @@ function getDBConnection() {
 }
 
 // Admin credentials - use environment variables
+// Debug: log the password being used
+$adminPassFromEnv = getenv('ADMIN_PASSWORD');
+if ($adminPassFromEnv) {
+    error_log('ADMIN_PASSWORD from env: ' . substr($adminPassFromEnv, 0, 10) . '...');
+} else {
+    error_log('ADMIN_PASSWORD using default');
+}
 define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
 define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');
 
