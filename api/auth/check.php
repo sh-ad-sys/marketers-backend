@@ -1,10 +1,16 @@
 <?php
+/**
+ * PlotConnect - Check Authentication API
+ */
 
 require_once dirname(__DIR__, 2) . '/config.php';
 
 header('Content-Type: application/json');
 
-session_start();
+// Only start session if not already active
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 $userType = getCurrentUserType();
 

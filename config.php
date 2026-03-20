@@ -35,7 +35,10 @@ session_set_cookie_params([
     'samesite' => 'None'
 ]);
 
-session_start();
+// Only start session if not already active
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // Load Hash class
 require_once __DIR__ . '/php/hash.php';
@@ -70,6 +73,9 @@ function getServiceURI() {
         DB_SSL_MODE
     );
 }
+
+// Full Service URI constant (for reference/logging)
+define('SERVICE_URI', 'mysql://avnadmin:***@plotconnect-shadrackmutua081-64f3.k.aivencloud.com:27258/defaultdb?ssl-mode=REQUIRED');
 
 /**
  * Get PDO database connection

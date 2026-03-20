@@ -9,10 +9,13 @@ ini_set('display_errors', 0);
 
 header('Content-Type: application/json; charset=utf-8');
 
-session_start();
-
 // 🔥 FIXED PATH (Render safe)
 require_once __DIR__ . '/../../config.php';
+
+// Only start session if not already active
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 /**
  * ========================
@@ -28,11 +31,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-/**
- * ========================
- * GET INPUT
- * ========================
- */
 $data = json_decode(file_get_contents('php://input'), true);
 
 if (!$data) {
@@ -114,11 +112,10 @@ if ($type === 'admin') {
  * MARKETER LOGIN
  * ========================
  */
-elseif ($type === 'marketer') {
-
+if ($type === 'marketer') {
     $name = $data['name'] ?? '';
     $phone = $data['phone'] ?? '';
-
+    
     if (empty($name) && empty($phone)) {
         echo json_encode([
             "success" => false,
@@ -126,36 +123,24 @@ elseif ($type === 'marketer') {
         ]);
         exit;
     }
-
-    try {
-
-        if (!empty($name)) {
-            $stmt = $conn->prepare("
-                SELECT id, name, phone, password 
-                FROM marketers 
-                WHERE name = ? AND is_active = 1
-                LIMIT 1
-            ");
-            $stmt->execute([$name]);
-        } else {
-            $stmt = $conn->prepare("
-                SELECT id, name, phone, password 
-                FROM marketers 
-                WHERE phone = ? AND is_active = 1
-                LIMIT 1
-            ");
-            $stmt->execute([$phone]);
-        }
-
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($result && password_verify($password, $result['password'])) {
-
+    
+    // Try to find by name or phone
+    if (!empty($name)) {
+        $stmt = $conn->prepare("SELECT id, name, phone, password FROM marketers WHERE name = ? AND is_active = 1");
+        $stmt->execute([$name]);
+    } else {
+        $stmt = $conn->prepare("SELECT id, name, phone, password FROM marketers WHERE phone = ? AND is_active = 1");
+        $stmt->execute([$phone]);
+    }
+    $result = $stmt->fetch();
+    
+    if ($result) {
+        if (password_verify($password, $result['password'])) {
             $_SESSION['marketer_id'] = $result['id'];
             $_SESSION['marketer_name'] = $result['name'];
             $_SESSION['marketer_phone'] = $result['phone'];
             $_SESSION['user_type'] = 'marketer';
-
+            
             echo json_encode([
                 "success" => true,
                 "message" => "Login successful",
@@ -166,33 +151,23 @@ elseif ($type === 'marketer') {
                 ]
             ]);
             exit;
-
         } else {
             echo json_encode([
                 "success" => false,
-                "message" => "Invalid credentials"
+                "message" => "Invalid password"
             ]);
             exit;
         }
-
-    } catch (Exception $e) {
+    } else {
         echo json_encode([
             "success" => false,
-            "message" => "Server error"
+            "message" => "Invalid credentials. Please contact admin to register."
         ]);
         exit;
     }
 }
 
-/**
- * ========================
- * INVALID TYPE
- * ========================
- */
-else {
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user type"
-    ]);
-    exit;
-}
+echo json_encode([
+    "success" => false,
+    "message" => "Invalid user type"
+]);
