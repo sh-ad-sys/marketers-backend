@@ -66,11 +66,11 @@ function sanitize($input) {
 
 // Database credentials - use environment variables OR hardcoded fallback
 // For production, set these in Render dashboard environment variables
-define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
-define('DB_PORT', getenv('DB_PORT') ?: '27258');
-define('DB_NAME', getenv('DB_NAME') ?: 'defaultdb');
-define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
-define('DB_PASS', getenv('DB_PASS') ?: 'AVNS_Q-OTx-X8_9pxJLFsNY4');
+if (!defined('DB_HOST')) define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
+if (!defined('DB_PORT')) define('DB_PORT', getenv('DB_PORT') ?: '27258');
+if (!defined('DB_NAME')) define('DB_NAME', getenv('DB_NAME') ?: 'defaultdb');
+if (!defined('DB_USER')) define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
+if (!defined('DB_PASS')) define('DB_PASS', getenv('DB_PASS') ?: 'AVNS_Q-OTx-X8_9pxJLFsNY4');
 
 // Override from .env if loaded
 if (isset($_ENV['DB_HOST']) && $_ENV['DB_HOST']) {
@@ -98,7 +98,7 @@ function getServiceURI() {
 }
 
 // Full Service URI constant (for reference/logging)
-define('SERVICE_URI', 'mysql://avnadmin:***@plotconnect-shadrackmutua081-64f3.k.aivencloud.com:27258/defaultdb?ssl-mode=REQUIRED');
+if (!defined('SERVICE_URI')) define('SERVICE_URI', 'mysql://avnadmin:***@plotconnect-shadrackmutua081-64f3.k.aivencloud.com:27258/defaultdb?ssl-mode=REQUIRED');
 
 /**
  * Get PDO database connection
@@ -140,8 +140,8 @@ function getDBConnection() {
 $adminUser = getenv('ADMIN_USERNAME') ?: 'admin';
 $adminPass = getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
 
-define('ADMIN_USERNAME', $adminUser);
-define('ADMIN_PASSWORD', $adminPass);
+if (!defined('ADMIN_USERNAME')) define('ADMIN_USERNAME', $adminUser);
+if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', $adminPass);
 
 // Debug: log what's being used
 error_log('ADMIN_USERNAME: ' . ADMIN_USERNAME);
