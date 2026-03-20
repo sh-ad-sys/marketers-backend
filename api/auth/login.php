@@ -47,6 +47,8 @@ $password = $data['password'] ?? '';
 
 // Debug: log what was received
 error_log('Login attempt: type=' . $type . ', username=' . $username . ', password_len=' . strlen($password));
+error_log('ADMIN_USERNAME constant: ' . ADMIN_USERNAME);
+error_log('ADMIN_PASSWORD hash: ' . substr(ADMIN_PASSWORD, 0, 20) . '...');
 
 if (empty($type) || empty($password)) {
     echo json_encode([
@@ -81,7 +83,11 @@ if ($type === 'admin') {
         exit;
     }
 
-    if ($username === ADMIN_USERNAME && password_verify($password, ADMIN_PASSWORD)) {
+    // Debug: check password verification
+$passwordCheck = password_verify($password, ADMIN_PASSWORD);
+error_log('Password check result: ' . ($passwordCheck ? 'true' : 'false'));
+
+if ($username === ADMIN_USERNAME && $passwordCheck) {
 
         $_SESSION['admin_id'] = 1;
         $_SESSION['admin_username'] = $username;

@@ -6,6 +6,20 @@
  * NOTE: Secrets should be set via environment variables for security
  */
 
+// Load .env file if exists
+$envFile = __DIR__ . '/.env';
+if (file_exists($envFile)) {
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos($line, '#') === 0) continue;
+        if (strpos($line, '=') !== false) {
+            list($key, $value) = explode('=', $line, 2);
+            $_ENV[trim($key)] = trim($value);
+            putenv(trim($key) . '=' . trim($value));
+        }
+    }
+}
+
 // CORS
 $allowedOrigins = [
     "http://localhost:3000",
@@ -113,15 +127,12 @@ function getDBConnection() {
 }
 
 // Admin credentials - use environment variables
-// Debug: log the password being used
-$adminPassFromEnv = getenv('ADMIN_PASSWORD');
-if ($adminPassFromEnv) {
-    error_log('ADMIN_PASSWORD from env: ' . substr($adminPassFromEnv, 0, 10) . '...');
-} else {
-    error_log('ADMIN_PASSWORD using default');
-}
 define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
 define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');
+
+// Debug: log what's being used
+error_log('ADMIN_USERNAME: ' . ADMIN_USERNAME);
+error_log('ADMIN_PASSWORD hash: ' . substr(ADMIN_PASSWORD, 0, 20) . '...');
 
 /**
  * Verify admin credentials
