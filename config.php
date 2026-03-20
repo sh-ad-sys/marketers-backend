@@ -64,12 +64,21 @@ function sanitize($input) {
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
 }
 
-// Database credentials - use environment variables
+// Database credentials - use environment variables OR hardcoded fallback
+// For production, set these in Render dashboard environment variables
 define('DB_HOST', getenv('DB_HOST') ?: 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com');
 define('DB_PORT', getenv('DB_PORT') ?: '27258');
 define('DB_NAME', getenv('DB_NAME') ?: 'defaultdb');
 define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
-define('DB_PASS', getenv('DB_PASS') ?: '');
+define('DB_PASS', getenv('DB_PASS') ?: 'AVNS_Q-OTx-X8_9pxJLFsNY4');
+
+// Override from .env if loaded
+if (isset($_ENV['DB_HOST']) && $_ENV['DB_HOST']) {
+    define('DB_HOST', $_ENV['DB_HOST']);
+}
+if (isset($_ENV['DB_PASS']) && $_ENV['DB_PASS']) {
+    define('DB_PASS', $_ENV['DB_PASS']);
+}
 
 // SSL Configuration
 define('DB_SSL_MODE', 'REQUIRED');
@@ -126,13 +135,27 @@ function getDBConnection() {
     return $pdo;
 }
 
-// Admin credentials - use environment variables
-define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
-define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');
+// Admin credentials - use environment variables OR hardcoded fallback
+// For production, set these in Render dashboard environment variables
+$adminUser = getenv('ADMIN_USERNAME') ?: 'admin';
+$adminPass = getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+
+define('ADMIN_USERNAME', $adminUser);
+define('ADMIN_PASSWORD', $adminPass);
 
 // Debug: log what's being used
 error_log('ADMIN_USERNAME: ' . ADMIN_USERNAME);
 error_log('ADMIN_PASSWORD hash: ' . substr(ADMIN_PASSWORD, 0, 20) . '...');
+
+// Also check $_ENV which is populated from .env file
+if (isset($_ENV['ADMIN_USERNAME']) && $_ENV['ADMIN_USERNAME']) {
+    define('ADMIN_USERNAME', $_ENV['ADMIN_USERNAME']);
+    error_log('Overridden ADMIN_USERNAME from .env: ' . ADMIN_USERNAME);
+}
+if (isset($_ENV['ADMIN_PASSWORD']) && $_ENV['ADMIN_PASSWORD']) {
+    define('ADMIN_PASSWORD', $_ENV['ADMIN_PASSWORD']);
+    error_log('Overridden ADMIN_PASSWORD from .env: ' . substr(ADMIN_PASSWORD, 0, 20) . '...');
+}
 
 /**
  * Verify admin credentials
