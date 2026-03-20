@@ -1,23 +1,30 @@
 <?php
-/**
- * PlotConnect - Check Authentication API
- */
 
 require_once dirname(__DIR__, 2) . '/config.php';
+
+header('Content-Type: application/json');
+
+session_start();
 
 $userType = getCurrentUserType();
 
 if ($userType === 'admin') {
-    jsonResponse(true, 'Authenticated', [
+    echo json_encode([
+        'success' => true,
         'user_type' => 'admin',
         'username' => $_SESSION['admin_username']
     ]);
 } elseif ($userType === 'marketer') {
-    jsonResponse(true, 'Authenticated', [
+    echo json_encode([
+        'success' => true,
         'user_type' => 'marketer',
         'name' => $_SESSION['marketer_name'],
         'phone' => $_SESSION['marketer_phone']
     ]);
 } else {
-    jsonResponse(false, 'Not authenticated', null, 401);
+    http_response_code(401);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Not authenticated'
+    ]);
 }

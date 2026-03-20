@@ -1,93 +1,195 @@
 <?php
 /**
- * PlotConnect - Login API
+ * PlotConnect - Login API (PRODUCTION FIXED)
  */
 
-require_once dirname(__DIR__, 2) . '/config.php';
+// 🔥 MUST BE FIRST (prevents HTML output issues)
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 
-// Only allow POST requests
+header('Content-Type: application/json; charset=utf-8');
+
+session_start();
+
+// 🔥 FIXED PATH (Render safe)
+require_once __DIR__ . '/../../config.php';
+
+/**
+ * ========================
+ * ONLY POST ALLOWED
+ * ========================
+ */
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(false, 'Invalid request method', null, 405);
+    http_response_code(405);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid request method"
+    ]);
+    exit;
 }
 
-// Get input data
+/**
+ * ========================
+ * GET INPUT
+ * ========================
+ */
 $data = json_decode(file_get_contents('php://input'), true);
-$type = isset($data['type']) ? $data['type'] : '';
-$username = isset($data['username']) ? $data['username'] : '';
-$password = isset($data['password']) ? $data['password'] : '';
 
-// Validate input
+if (!$data) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid JSON input"
+    ]);
+    exit;
+}
+
+$type = $data['type'] ?? '';
+$username = $data['username'] ?? '';
+$password = $data['password'] ?? '';
+
 if (empty($type) || empty($password)) {
-    jsonResponse(false, 'Please fill in all required fields');
-}
-
-if ($type === 'admin' && empty($username)) {
-    jsonResponse(false, 'Please fill in all required fields');
-}
-
-if ($type === 'marketer') {
-    $name = isset($data['name']) ? $data['name'] : '';
-    $phone = isset($data['phone']) ? $data['phone'] : '';
-    
-    if (empty($name) && empty($phone)) {
-        jsonResponse(false, 'Please fill in all required fields');
-    }
+    echo json_encode([
+        "success" => false,
+        "message" => "Please fill in all required fields"
+    ]);
+    exit;
 }
 
 $conn = getDBConnection();
 
+if (!$conn) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection failed"
+    ]);
+    exit;
+}
+
+/**
+ * ========================
+ * ADMIN LOGIN
+ * ========================
+ */
 if ($type === 'admin') {
-    // Admin login - use hardcoded credentials from config
-    if ($username === ADMIN_USERNAME && Hash::check($password, ADMIN_PASSWORD)) {
+
+    if (empty($username)) {
+        echo json_encode([
+            "success" => false,
+            "message" => "Username is required"
+        ]);
+        exit;
+    }
+
+    if ($username === ADMIN_USERNAME && password_verify($password, ADMIN_PASSWORD)) {
+
         $_SESSION['admin_id'] = 1;
         $_SESSION['admin_username'] = $username;
         $_SESSION['user_type'] = 'admin';
-        
-        jsonResponse(true, 'Login successful', [
-            'user_type' => 'admin',
-            'username' => $username,
-            'full_name' => 'Administrator'
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Login successful",
+            "data" => [
+                "user_type" => "admin",
+                "username" => $username,
+                "full_name" => "Administrator"
+            ]
         ]);
+        exit;
+
     } else {
-        jsonResponse(false, 'Invalid credentials');
+        echo json_encode([
+            "success" => false,
+            "message" => "Invalid credentials"
+        ]);
+        exit;
     }
-} elseif ($type === 'marketer') {
-    // Marketer login - accept either name OR phone
-    $name = isset($data['name']) ? $data['name'] : '';
-    $phone = isset($data['phone']) ? $data['phone'] : '';
-    
+}
+
+/**
+ * ========================
+ * MARKETER LOGIN
+ * ========================
+ */
+elseif ($type === 'marketer') {
+
+    $name = $data['name'] ?? '';
+    $phone = $data['phone'] ?? '';
+
     if (empty($name) && empty($phone)) {
-        jsonResponse(false, 'Please enter name or phone number');
+        echo json_encode([
+            "success" => false,
+            "message" => "Please enter name or phone number"
+        ]);
+        exit;
     }
-    
-    // Try to find by name or phone
-    if (!empty($name)) {
-        $stmt = $conn->prepare("SELECT id, name, phone, password FROM marketers WHERE name = ? AND is_active = 1");
-        $stmt->execute([$name]);
-    } else {
-        $stmt = $conn->prepare("SELECT id, name, phone, password FROM marketers WHERE phone = ? AND is_active = 1");
-        $stmt->execute([$phone]);
-    }
-    $result = $stmt->fetch();
-    
-    if ($result) {
-        if (Hash::check($password, $result['password'])) {
+
+    try {
+
+        if (!empty($name)) {
+            $stmt = $conn->prepare("
+                SELECT id, name, phone, password 
+                FROM marketers 
+                WHERE name = ? AND is_active = 1
+                LIMIT 1
+            ");
+            $stmt->execute([$name]);
+        } else {
+            $stmt = $conn->prepare("
+                SELECT id, name, phone, password 
+                FROM marketers 
+                WHERE phone = ? AND is_active = 1
+                LIMIT 1
+            ");
+            $stmt->execute([$phone]);
+        }
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($result && password_verify($password, $result['password'])) {
+
             $_SESSION['marketer_id'] = $result['id'];
             $_SESSION['marketer_name'] = $result['name'];
             $_SESSION['marketer_phone'] = $result['phone'];
             $_SESSION['user_type'] = 'marketer';
-            
-            jsonResponse(true, 'Login successful', [
-                'user_type' => 'marketer',
-                'name' => $result['name'],
-                'phone' => $result['phone']
+
+            echo json_encode([
+                "success" => true,
+                "message" => "Login successful",
+                "data" => [
+                    "user_type" => "marketer",
+                    "name" => $result['name'],
+                    "phone" => $result['phone']
+                ]
             ]);
+            exit;
+
         } else {
-            jsonResponse(false, 'Invalid password');
+            echo json_encode([
+                "success" => false,
+                "message" => "Invalid credentials"
+            ]);
+            exit;
         }
-    } else {
-        jsonResponse(false, 'Invalid credentials. Please contact admin to register.');
+
+    } catch (Exception $e) {
+        echo json_encode([
+            "success" => false,
+            "message" => "Server error"
+        ]);
+        exit;
     }
-} else {
-    jsonResponse(false, 'Invalid user type');
+}
+
+/**
+ * ========================
+ * INVALID TYPE
+ * ========================
+ */
+else {
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid user type"
+    ]);
+    exit;
 }

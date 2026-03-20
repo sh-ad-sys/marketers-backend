@@ -108,7 +108,7 @@ function getDBConnection() {
 
 // Admin credentials - use environment variables
 define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
-define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '');
+define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');
 
 /**
  * Verify admin credentials
@@ -117,7 +117,7 @@ define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: '');
  * @return bool
  */
 function verifyAdmin($username, $password) {
-    if ($username === ADMIN_USERNAME && Hash::check($password, ADMIN_PASSWORD)) {
+    if ($username === ADMIN_USERNAME && password_verify($password, ADMIN_PASSWORD)) {
         return true;
     }
     return false;
