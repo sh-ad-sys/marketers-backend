@@ -1,76 +1,112 @@
 <?php
 /**
- * PlotConnect - Admin Marketers Management API
+ * PlotConnect - Marketers API
+ * Handles GET (list) and POST (add/delete)
  */
+
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 
 require_once dirname(__DIR__, 2) . '/config.php';
 
-// Check if admin is logged in
-if (getCurrentUserType() !== 'admin') {
-    jsonResponse(false, 'Unauthorized', null, 401);
+header('Content-Type: application/json; charset=utf-8');
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-$conn = getDBConnection();
 $method = $_SERVER['REQUEST_METHOD'];
 
-// Handle different HTTP methods
+// ── GET: list all marketers ──────────────────────────────────────────────────
 if ($method === 'GET') {
-    // Get all marketers
-    $stmt = $conn->query("SELECT id, name, email, phone, is_active, created_at FROM marketers ORDER BY created_at DESC");
-    $marketers = $stmt->fetchAll();
-    jsonResponse(true, 'Marketers retrieved', $marketers);
-    
-} elseif ($method === 'POST') {
-    // Add new marketer
-    $data = json_decode(file_get_contents('php://input'), true);
-    $action = $data['action'] ?? '';
-    
-    if ($action === 'delete') {
-        // Delete marketer
-        $id = intval($data['id'] ?? 0);
-        if ($id === 0) {
-            jsonResponse(false, 'Invalid marketer ID');
-        }
-        
-        $stmt = $conn->prepare("DELETE FROM marketers WHERE id = ?");
-        $stmt->execute([$id]);
-        jsonResponse(true, 'Marketer deleted successfully');
-    }
-    
-    // Add new marketer
-    $name = sanitize($data['name'] ?? '');
-    $phone = sanitize($data['phone'] ?? '');
-    $email = sanitize($data['email'] ?? '');
-    $password = $data['password'] ?? '';
-    
-    if (empty($name) || empty($phone) || empty($password)) {
-        jsonResponse(false, 'All fields are required');
-    }
-    
-    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-    $stmt = $conn->prepare("INSERT INTO marketers (name, phone, email, password) VALUES (?, ?, ?, ?)");
-    
     try {
-        $stmt->execute([$name, $phone, $email, $hashedPassword]);
-        jsonResponse(true, 'Marketer added successfully', ['id' => $conn->lastInsertId()]);
+        $conn = getDBConnection();
+        $stmt = $conn->query("SELECT id, name, email, phone, created_at FROM marketers WHERE is_active = 1 ORDER BY name ASC");
+        $marketers = $stmt->fetchAll();
+
+        echo json_encode(["success" => true, "data" => $marketers]);
     } catch (Exception $e) {
-        jsonResponse(false, 'Error adding marketer. Phone number may already exist.');
+        error_log('Marketers GET error: ' . $e->getMessage());
+        echo json_encode(["success" => false, "message" => "Failed to fetch marketers"]);
     }
-    
-} elseif ($method === 'PUT') {
-    // Update marketer status
-    $data = json_decode(file_get_contents('php://input'), true);
-    $id = intval($data['id'] ?? 0);
-    $isActive = intval($data['is_active'] ?? 1);
-    
-    if ($id === 0) {
-        jsonResponse(false, 'Invalid marketer ID');
-    }
-    
-    $stmt = $conn->prepare("UPDATE marketers SET is_active = ? WHERE id = ?");
-    $stmt->execute([$isActive, $id]);
-    jsonResponse(true, 'Marketer status updated');
-    
-} else {
-    jsonResponse(false, 'Method not allowed', null, 405);
+    exit;
 }
+
+// ── POST: add or delete marketer ─────────────────────────────────────────────
+if ($method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (!$input) {
+        echo json_encode(["success" => false, "message" => "Invalid JSON input"]);
+        exit;
+    }
+
+    $action = $input['action'] ?? 'add';
+
+    // DELETE action
+    if ($action === 'delete') {
+        $id = (int)($input['id'] ?? 0);
+        if (!$id) {
+            echo json_encode(["success" => false, "message" => "Invalid marketer ID"]);
+            exit;
+        }
+        try {
+            $conn = getDBConnection();
+            $stmt = $conn->prepare("UPDATE marketers SET is_active = 0 WHERE id = ?");
+            $stmt->execute([$id]);
+            echo json_encode(["success" => true, "message" => "Marketer removed"]);
+        } catch (Exception $e) {
+            error_log('Marketer delete error: ' . $e->getMessage());
+            echo json_encode(["success" => false, "message" => "Failed to remove marketer"]);
+        }
+        exit;
+    }
+
+    // ADD action (default)
+    $name     = trim($input['name']     ?? '');
+    $email    = trim($input['email']    ?? '');
+    $phone    = trim($input['phone']    ?? '');
+    $password = trim($input['password'] ?? '');
+
+    if (!$name || !$email || !$phone || !$password) {
+        echo json_encode(["success" => false, "message" => "All fields are required"]);
+        exit;
+    }
+
+    try {
+        $conn = getDBConnection();
+
+        // Check for duplicate email or name
+        $check = $conn->prepare("SELECT id FROM marketers WHERE (email = ? OR name = ?) AND is_active = 1");
+        $check->execute([$email, $name]);
+        if ($check->fetch()) {
+            echo json_encode(["success" => false, "message" => "A marketer with this name or email already exists"]);
+            exit;
+        }
+
+        $hashed = password_hash($password, PASSWORD_BCRYPT);
+        $stmt = $conn->prepare(
+            "INSERT INTO marketers (name, email, phone, password, is_active, created_at)
+             VALUES (?, ?, ?, ?, 1, NOW())"
+        );
+        $stmt->execute([$name, $email, $phone, $hashed]);
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Marketer added successfully",
+            "data"    => [
+                "id"    => $conn->lastInsertId(),
+                "name"  => $name,
+                "email" => $email,
+                "phone" => $phone
+            ]
+        ]);
+    } catch (Exception $e) {
+        error_log('Add marketer error: ' . $e->getMessage());
+        echo json_encode(["success" => false, "message" => "Failed to add marketer: " . $e->getMessage()]);
+    }
+    exit;
+}
+
+http_response_code(405);
+echo json_encode(["success" => false, "message" => "Method not allowed"]);
