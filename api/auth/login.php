@@ -112,7 +112,8 @@ if ($type === 'marketer') {
             "data"    => [
                 "user_type" => "marketer",
                 "name"      => $result['name'],
-                "phone"     => $result['phone']
+                "phone"     => $result['phone'],
+                "marketer_id" => $result['id']
             ]
         ]);
     } elseif (!$result) {

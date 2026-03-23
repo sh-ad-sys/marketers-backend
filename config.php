@@ -53,7 +53,7 @@ if ($isLocalhost || $isVercel || empty($origin)) {
     header("Access-Control-Allow-Origin: *");
 }
 
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, Accept");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -100,10 +100,18 @@ function getCurrentUserType() {
         return $_SESSION['user_type'];
     }
 
-    // 2. Header-based auth (cross-origin: Vercel → Render)
+    // 2. Header-based auth (cross-origin: Vercel → Render or local dev)
     $role = $_SERVER['HTTP_X_AUTH_ROLE'] ?? '';
     if (in_array($role, ['admin', 'marketer'], true)) {
         return $role;
+    }
+
+    // 3. Also check X-Auth-Marketer-Id header for session-less auth
+    $marketerId = $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? '';
+    if (!empty($marketerId)) {
+        $_SESSION['marketer_id'] = $marketerId;
+        $_SESSION['user_type'] = 'marketer';
+        return 'marketer';
     }
 
     return null;

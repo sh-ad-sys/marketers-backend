@@ -3,11 +3,33 @@
  * PlotConnect - Marketer Submit Property API
  */
 
+// Enable error logging
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Log request info
+error_log("submit-property.php called. Session: " . session_id() . ", User type: " . ($_SESSION['user_type'] ?? 'not set') . ", Header X-Auth-Role: " . ($_SERVER['HTTP_X_AUTH_ROLE'] ?? 'not set') . ", Header X-Auth-Marketer-Id: " . ($_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? 'not set'));
+
 require_once dirname(__DIR__, 2) . '/config.php';
 
-// Check if marketer is logged in
-if (!isMarketerLoggedIn()) {
-    jsonResponse(false, 'Unauthorized', null, 401);
+// Check if marketer is logged in - using header-based auth
+$currentUser = getCurrentUserType();
+$marketerId = $_SESSION['marketer_id'] ?? $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? null;
+
+if (!$currentUser && !$marketerId) {
+    jsonResponse(false, 'Unauthorized - Please login first', null, 401);
+}
+
+// If we have the header but no session, set it up
+if ($marketerId && !$currentUser) {
+    $_SESSION['marketer_id'] = $marketerId;
+    $_SESSION['user_type'] = 'marketer';
+    $currentUser = 'marketer';
+}
+
+if ($currentUser !== 'marketer') {
+    jsonResponse(false, 'Unauthorized - Not a marketer', null, 401);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -15,7 +37,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $conn = getDBConnection();
-$marketerId = $_SESSION['marketer_id'];
+// Get marketer ID from session or header
+$marketerId = $_SESSION['marketer_id'] ?? null;
+if (!$marketerId) {
+    $marketerId = $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? null;
+}
 
 // Get input data
 $data = json_decode(file_get_contents('php://input'), true);
