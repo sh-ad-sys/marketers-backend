@@ -111,8 +111,9 @@ if (!defined('DB_SSL_MODE')) define('DB_SSL_MODE', 'REQUIRED');
 if (!defined('DB_SSL_CA'))   define('DB_SSL_CA',   __DIR__ . '/ca.pem');
 
 // ── Admin credentials ─────────────────────────────────────────────────────────
-$adminUser = $_ENV['ADMIN_USERNAME'] ?? getenv('ADMIN_USERNAME') ?: 'admin';
-$adminPass = $_ENV['ADMIN_PASSWORD'] ?? getenv('ADMIN_PASSWORD') ?: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+// Try multiple methods to get environment variables (works with Render)
+$adminUser = getenv('ADMIN_USERNAME') ?: ($_ENV['ADMIN_USERNAME'] ?? 'admin');
+$adminPass = getenv('ADMIN_PASSWORD') ?: ($_ENV['ADMIN_PASSWORD'] ?? '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi');
 
 if (!defined('ADMIN_USERNAME')) define('ADMIN_USERNAME', $adminUser);
 if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', $adminPass);
