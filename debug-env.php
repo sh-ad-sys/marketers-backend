@@ -1,7 +1,9 @@
 <?php
 /**
- * Debug - Check environment variables
+ * Debug - Check environment variables and constants
  */
+
+require_once 'config.php';
 
 header('Content-Type: text/plain');
 
@@ -12,3 +14,5 @@ echo "ADMIN_PASSWORD from getenv: " . getenv('ADMIN_PASSWORD') . "\n";
 echo "ADMIN_PASSWORD from \$_ENV: " . ($_ENV['ADMIN_PASSWORD'] ?? 'NOT SET') . "\n";
 echo "\n";
 echo "ADMIN_PASSWORD constant: " . (defined('ADMIN_PASSWORD') ? ADMIN_PASSWORD : 'NOT DEFINED') . "\n";
+echo "\n";
+echo "Testing password_verify with 'password': " . (password_verify('password', getenv('ADMIN_PASSWORD')) ? 'MATCH' : 'NO MATCH') . "\n";
