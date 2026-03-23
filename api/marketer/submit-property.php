@@ -92,8 +92,9 @@ if (empty($ownerName) || empty($phoneNumber) || empty($propertyLocation) ||
 
 // Insert property
 try {
-    $stmt = $conn->prepare("INSERT INTO properties (marketer_id, owner_name, owner_email, phone_number, property_name, property_location, property_type, property_description, booking_type, package_selected, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
-    $stmt->execute([$marketerId, $ownerName, $ownerEmail, $phoneNumber, $propertyName, $propertyLocation, $propertyType, $propertyDescription, $bookingType, $packageSelected]);
+    // Try with minimal columns - let the database tell us what's wrong
+    $stmt = $conn->prepare("INSERT INTO properties (marketer_id, owner_name, phone, property_name, property_location, property_type, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
+    $stmt->execute([$marketerId, $ownerName, $phoneNumber, $propertyName, $propertyLocation, $propertyType]);
     $propertyId = $conn->lastInsertId();
 } catch (PDOException $e) {
     error_log("Insert property error: " . $e->getMessage());
@@ -104,17 +105,17 @@ try {
 // Insert room categories
 if (!empty($rooms)) {
     try {
-        $roomStmt = $conn->prepare("INSERT INTO room_categories (property_id, room_type, room_size, price, availability, amenities) VALUES (?, ?, ?, ?, ?, ?)");
+        // Use property_rooms table as per database schema
+        $roomStmt = $conn->prepare("INSERT INTO property_rooms (property_id, room_type, room_size, price, availability) VALUES (?, ?, ?, ?, ?)");
         
         foreach ($rooms as $room) {
             $roomType = htmlspecialchars(trim($room['room_type'] ?? ''), ENT_QUOTES, 'UTF-8');
             $roomSize = htmlspecialchars(trim($room['room_size'] ?? ''), ENT_QUOTES, 'UTF-8');
             $price = floatval($room['price'] ?? 0);
-            $availability = intval($room['availability'] ?? 0);
-            $amenities = htmlspecialchars(trim($room['amenities'] ?? ''), ENT_QUOTES, 'UTF-8');
+            $availability = htmlspecialchars(trim($room['availability'] ?? ''), ENT_QUOTES, 'UTF-8');
             
             if (!empty($roomType) && $price > 0) {
-                $roomStmt->execute([$propertyId, $roomType, $roomSize, $price, $availability, $amenities]);
+                $roomStmt->execute([$propertyId, $roomType, $roomSize, $price, $availability]);
             }
         }
     } catch (PDOException $e) {

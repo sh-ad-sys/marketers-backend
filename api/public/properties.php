@@ -18,9 +18,13 @@ $properties = $result->fetchAll();
 
 foreach ($properties as &$property) {
     // Get room categories for each property
-    $roomStmt = $conn->prepare("SELECT * FROM room_categories WHERE property_id = ?");
-    $roomStmt->execute([$property['id']]);
-    $property['rooms'] = $roomStmt->fetchAll();
+    try {
+        $roomStmt = $conn->prepare("SELECT * FROM property_rooms WHERE property_id = ?");
+        $roomStmt->execute([$property['id']]);
+        $property['rooms'] = $roomStmt->fetchAll();
+    } catch (Exception $e) {
+        $property['rooms'] = [];
+    }
 }
 
 jsonResponse(true, 'Properties retrieved', $properties);
