@@ -11,7 +11,13 @@ ini_set('log_errors', 1);
 // Log request info
 error_log("submit-property.php called. Session: " . session_id() . ", User type: " . ($_SESSION['user_type'] ?? 'not set') . ", Header X-Auth-Role: " . ($_SERVER['HTTP_X_AUTH_ROLE'] ?? 'not set') . ", Header X-Auth-Marketer-Id: " . ($_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? 'not set'));
 
-require_once dirname(__DIR__, 2) . '/config.php';
+try {
+    require_once dirname(__DIR__, 2) . '/config.php';
+} catch (Exception $e) {
+    error_log("Config load error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Server configuration error']);
+    exit;
+}
 
 // Check if marketer is logged in - using header-based auth
 $currentUser = getCurrentUserType();
@@ -36,7 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     jsonResponse(false, 'Invalid request method', null, 405);
 }
 
-$conn = getDBConnection();
+try {
+    $conn = getDBConnection();
+} catch (Exception $e) {
+    error_log("DB connection error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit;
+}
 // Get marketer ID from session or header
 $marketerId = $_SESSION['marketer_id'] ?? null;
 if (!$marketerId) {
