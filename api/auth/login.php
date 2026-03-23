@@ -69,8 +69,10 @@ if ($type === 'admin') {
                 "name"      => "Administrator"
             ]
         ]);
+    } elseif ($username !== ADMIN_USERNAME) {
+        echo json_encode(["success" => false, "message" => "Admin username not found"]);
     } else {
-        echo json_encode(["success" => false, "message" => "Invalid credentials"]);
+        echo json_encode(["success" => false, "message" => "Incorrect password"]);
     }
     exit;
 }
@@ -113,8 +115,10 @@ if ($type === 'marketer') {
                 "phone"     => $result['phone']
             ]
         ]);
+    } elseif (!$result) {
+        echo json_encode(["success" => false, "message" => "Marketer name not found"]);
     } else {
-        echo json_encode(["success" => false, "message" => "Invalid credentials. Please contact admin to register."]);
+        echo json_encode(["success" => false, "message" => "Incorrect password"]);
     }
     exit;
 }
