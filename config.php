@@ -62,14 +62,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
+// For local development (HTTP), use less strict cookie settings
+$isLocal = isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'localhost') !== false;
+
 if (session_status() === PHP_SESSION_NONE) {
-    session_set_cookie_params([
+    $cookieParams = [
         'lifetime' => 0,
         'path'     => '/',
-        'secure'   => true,
+        'secure'   => !$isLocal,  // false for localhost, true for production
         'httponly' => true,
-        'samesite' => 'None'
-    ]);
+        'samesite' => $isLocal ? 'Lax' : 'None'
+    ];
+    session_set_cookie_params($cookieParams);
     session_start();
 }
 
