@@ -127,17 +127,18 @@ function login() {
                     'user_type' => 'admin'
                 ]
             ]);
+        } elseif (!$admin) {
+            echo json_encode(['success' => false, 'message' => 'Admin username not found']);
         } else {
-            echo json_encode(['success' => false, 'message' => 'Invalid admin credentials']);
+            echo json_encode(['success' => false, 'message' => 'Incorrect password']);
         }
     } else {
-        // Marketer login
+        // Marketer login - name and password only
         $name = $data['name'] ?? '';
-        $phone = $data['phone'] ?? '';
         $password = $data['password'] ?? '';
         
-        $stmt = $pdo->prepare("SELECT * FROM marketers WHERE name = ? AND phone = ? LIMIT 1");
-        $stmt->execute([$name, $phone]);
+        $stmt = $pdo->prepare("SELECT * FROM marketers WHERE name = ? LIMIT 1");
+        $stmt->execute([$name]);
         $marketer = $stmt->fetch();
         
         if ($marketer && password_verify($password, $marketer['password'])) {
@@ -156,8 +157,10 @@ function login() {
                     'user_type' => 'marketer'
                 ]
             ]);
+        } elseif (!$marketer) {
+            echo json_encode(['success' => false, 'message' => 'Marketer name not found']);
         } else {
-            echo json_encode(['success' => false, 'message' => 'Invalid marketer credentials']);
+            echo json_encode(['success' => false, 'message' => 'Incorrect password']);
         }
     }
 }
