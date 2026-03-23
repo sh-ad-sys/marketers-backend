@@ -15,7 +15,7 @@ $hash      = '';
 $error     = '';
 
 // Also diagnose the existing broken hash
-$brokenHash   = '$2y$10$vI8A7ugYvjX8rU2R.Yf8eeE1eK4.uX2O0m0Z5C8D4F0uV3wS7h6L.';
+$brokenHash   = '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
 $brokenLen    = strlen($brokenHash);
 $brokenInfo   = password_get_info($brokenHash);
 $brokenValid  = !empty($brokenInfo['algo']);
