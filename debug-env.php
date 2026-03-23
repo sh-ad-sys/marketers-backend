@@ -1,14 +1,12 @@
 <?php
 /**
- * Debug - Test basic password hashing
+ * Debug - Generate and test new hash
  */
 
 header('Content-Type: text/plain');
 
-$testHash = password_hash('password', PASSWORD_BCRYPT);
+$newHash = password_hash('password', PASSWORD_BCRYPT);
 
-echo "PHP Version: " . phpversion() . "\n\n";
+echo "NEW hash for 'password':\n$newHash\n\n";
 
-echo "New hash for 'password': $testHash\n\n";
-
-echo "Verify 'password' against new hash: " . (password_verify('password', $testHash) ? 'MATCH ✓' : 'NO MATCH ✗') . "\n";
+echo "Copy this to your Render ADMIN_PASSWORD env var:\n$newHash\n";
