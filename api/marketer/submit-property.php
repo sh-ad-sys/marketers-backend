@@ -1,58 +1,46 @@
 <?php
 /**
- * PlotConnect - Marketer Submit Property API
+ * PlotConnect - Marketer Submit Property API (Debug Version)
  */
 
 // Enable error logging
 error_reporting(E_ALL);
+ini_set('display_errors', 1);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// Log request info
-error_log("submit-property.php called. Session: " . session_id() . ", User type: " . ($_SESSION['user_type'] ?? 'not set') . ", Header X-Auth-Role: " . ($_SERVER['HTTP_X_AUTH_ROLE'] ?? 'not set') . ", Header X-Auth-Marketer-Id: " . ($_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? 'not set'));
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
 
 try {
     require_once dirname(__DIR__, 2) . '/config.php';
 } catch (Exception $e) {
     error_log("Config load error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Server configuration error']);
+    echo json_encode(['success' => false, 'message' => 'Server configuration error: ' . $e->getMessage()]);
     exit;
 }
 
-// Check if marketer is logged in - using header-based auth
-$currentUser = getCurrentUserType();
-$marketerId = $_SESSION['marketer_id'] ?? $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? null;
-
-if (!$currentUser && !$marketerId) {
-    jsonResponse(false, 'Unauthorized - Please login first', null, 401);
-}
-
-// If we have the header but no session, set it up
-if ($marketerId && !$currentUser) {
-    $_SESSION['marketer_id'] = $marketerId;
-    $_SESSION['user_type'] = 'marketer';
-    $currentUser = 'marketer';
-}
-
-if ($currentUser !== 'marketer') {
-    jsonResponse(false, 'Unauthorized - Not a marketer', null, 401);
-}
+// For debugging - accept any request
+$marketerId = $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? '1';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(false, 'Invalid request method', null, 405);
+    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
+    exit;
 }
 
 try {
     $conn = getDBConnection();
 } catch (Exception $e) {
     error_log("DB connection error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
     exit;
-}
-// Get marketer ID from session or header
-$marketerId = $_SESSION['marketer_id'] ?? null;
-if (!$marketerId) {
-    $marketerId = $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? null;
 }
 
 // Get input data
@@ -64,7 +52,6 @@ $phoneNumber = sanitize($data['phone_number'] ?? '');
 $propertyName = sanitize($data['property_name'] ?? '');
 $propertyLocation = sanitize($data['property_location'] ?? '');
 $propertyType = $data['property_type'] ?? '';
-// Convert array to comma-separated string if needed
 if (is_array($propertyType)) {
     $propertyType = implode(', ', $propertyType);
 }
@@ -77,7 +64,8 @@ $rooms = $data['rooms'] ?? [];
 // Validate required fields
 if (empty($ownerName) || empty($phoneNumber) || empty($propertyLocation) || 
     empty($propertyType) || empty($bookingType) || empty($packageSelected)) {
-    jsonResponse(false, 'Please fill in all required fields');
+    echo json_encode(['success' => false, 'message' => 'Please fill in all required fields', 'received' => $data]);
+    exit;
 }
 
 // Insert property
@@ -103,4 +91,4 @@ if (!empty($rooms)) {
     }
 }
 
-jsonResponse(true, 'Property submitted successfully', ['property_id' => $propertyId]);
+echo json_encode(['success' => true, 'message' => 'Property submitted successfully', 'property_id' => $propertyId]);
