@@ -1,14 +1,14 @@
 <?php
 /**
- * Debug - Check password
+ * Debug - Test basic password hashing
  */
-
-require_once 'config.php';
 
 header('Content-Type: text/plain');
 
-$hash = getenv('ADMIN_PASSWORD');
+$testHash = password_hash('password', PASSWORD_BCRYPT);
 
-echo "Current hash: $hash\n\n";
+echo "PHP Version: " . phpversion() . "\n\n";
 
-echo "Testing 'password': " . (password_verify('password', $hash) ? 'MATCH ✓' : 'NO MATCH ✗') . "\n";
+echo "New hash for 'password': $testHash\n\n";
+
+echo "Verify 'password' against new hash: " . (password_verify('password', $testHash) ? 'MATCH ✓' : 'NO MATCH ✗') . "\n";
