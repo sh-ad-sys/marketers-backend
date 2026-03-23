@@ -7,7 +7,24 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
 // ── Load .env ────────────────────────────────────────────────────────────────
-$envFile = __DIR__ . '/.env';
+// For local development, try multiple possible .env locations
+$possibleEnvFiles = [
+    __DIR__ . '/.env',
+    __DIR__ . '/php/.env',
+    dirname(__DIR__) . '/.env',
+    dirname(__DIR__) . '/php/.env',
+];
+
+$envFile = null;
+foreach ($possibleEnvFiles as $file) {
+    if (file_exists($file)) {
+        $envFile = $file;
+        break;
+    }
+}
+
+// Also check if we're on Render (environment variables are set in Render dashboard)
+// If RENDER flag is set, skip .env file
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
@@ -23,19 +40,21 @@ if (file_exists($envFile)) {
 }
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-$allowedOrigins = [
-    "http://localhost:3000",
-    "https://marketers-l984.vercel.app"
-];
-
+// Allow all localhost ports for development and Vercel for production
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins)) {
-    header("Access-Control-Allow-Origin: $origin");
+$isLocalhost = preg_match('/^http:\/\/localhost(:\d+)?$/', $origin);
+$isVercel = strpos($origin, 'vercel.app') !== false || strpos($origin, 'vercel.com') !== false;
+
+if ($isLocalhost || $isVercel || empty($origin)) {
+    header("Access-Control-Allow-Origin: " . ($origin ?: "*"));
+    header("Access-Control-Allow-Credentials: true");
+} else {
+    // Default: allow all for development
+    header("Access-Control-Allow-Origin: *");
 }
 
-header("Access-Control-Allow-Credentials: true");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, Accept");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);

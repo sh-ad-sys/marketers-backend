@@ -26,6 +26,13 @@ if (session_status() === PHP_SESSION_NONE) {
 // Get request path (remove /api/ prefix)
 $request = isset($_GET['request']) ? $_GET['request'] : '';
 
+// Also check PATH_INFO for direct PHP file access (e.g., /api/test.php)
+if (empty($request) && isset($_SERVER['PATH_INFO'])) {
+    $request = ltrim($_SERVER['PATH_INFO'], '/');
+    // Remove .php extension if present
+    $request = preg_replace('/\.php$/', '', $request);
+}
+
 // Parse request (e.g., "auth/login", "admin/marketers", "marketer/my-properties")
 $parts = explode('/', trim($request, '/'));
 $controller = isset($parts[0]) ? $parts[0] : '';
@@ -33,6 +40,11 @@ $action = isset($parts[1]) ? $parts[1] : '';
 
 // Route the request
 switch ($controller) {
+    // Test endpoint
+    case 'test':
+        require_once __DIR__ . '/test.php';
+        break;
+    
     // Auth endpoints
     case 'auth':
         if ($action === 'login') {
