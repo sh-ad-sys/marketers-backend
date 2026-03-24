@@ -2,6 +2,7 @@
 /**
  * PlotConnect API Router
  * Routes /api/* requests to appropriate handlers
+ * Now standalone - no config.php required
  */
 
 error_reporting(E_ALL);
@@ -10,14 +11,12 @@ ini_set('display_errors', 0);
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
-
-require_once __DIR__ . '/../config.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();

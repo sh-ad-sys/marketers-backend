@@ -11,7 +11,7 @@ ini_set('log_errors', 1);
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -24,6 +24,20 @@ $dbPort = '27258';
 $dbName = 'defaultdb';
 $dbUser = 'avnadmin';
 $dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+
+// Load JWT utility
+require_once __DIR__ . '/../jwt.php';
+
+// Authenticate using JWT
+$payload = JWT::authenticate();
+if (!$payload || $payload['user_type'] !== 'marketer') {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
+    exit;
+}
+
+// Get marketer ID from JWT payload
+$marketerId = $payload['marketer_id'];
 
 try {
     $dsn = sprintf(
@@ -40,9 +54,6 @@ try {
     echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
     exit;
 }
-
-// Get marketer ID from header
-$marketerId = $_SERVER['HTTP_X_AUTH_MARKETER_ID'] ?? '1';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Invalid request method']);

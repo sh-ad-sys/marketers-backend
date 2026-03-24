@@ -1,11 +1,44 @@
 <?php
 /**
- * PlotConnect - Public Properties API
+ * PlotConnect - Public Properties API (Standalone)
  */
 
-require_once dirname(__DIR__, 2) . '/config.php';
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-$conn = getDBConnection();
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Database connection - direct
+$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
+$dbPort = '27258';
+$dbName = 'defaultdb';
+$dbUser = 'avnadmin';
+$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+
+try {
+    $dsn = sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        $dbHost, $dbPort, $dbName
+    );
+    $conn = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+} catch (PDOException $e) {
+    error_log("DB Connection Error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit;
+}
 
 // Get approved properties
 $result = $conn->query("SELECT p.*, m.name as marketer_name, m.phone as marketer_phone 
@@ -27,4 +60,4 @@ foreach ($properties as &$property) {
     }
 }
 
-jsonResponse(true, 'Properties retrieved', $properties);
+echo json_encode(['success' => true, 'message' => 'Properties retrieved', 'data' => $properties]);

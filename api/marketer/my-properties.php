@@ -1,51 +1,61 @@
 <?php
 /**
- * PlotConnect - Marketer My Properties API
+ * PlotConnect - Marketer My Properties API (Standalone)
  */
 
-// Enable error logging for debugging
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// Log request info for debugging
-error_log("my-properties.php called. Session: " . session_id() . ", Session user_type: " . ($_SESSION['user_type'] ?? 'not set') . ", Header X-Auth-Role: " . ($_SERVER['HTTP_X_AUTH_ROLE'] ?? 'not set'));
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
 
-require_once dirname(__DIR__, 2) . '/config.php';
-
-// Check if marketer is logged in via session or header
-$currentUser = getCurrentUserType();
-
-// Also check session directly as fallback
-$sessionUserType = $_SESSION['user_type'] ?? null;
-$headerRole = $_SERVER['HTTP_X_AUTH_ROLE'] ?? '';
-
-error_log("After config. Current user: " . var_export($currentUser, true) . ", Session user_type: " . var_export($sessionUserType, true) . ", Header role: " . $headerRole);
-
-if (!$currentUser) {
-    jsonResponse(false, 'Unauthorized - Please login first. Session: ' . var_export($sessionUserType, true) . ', Header: ' . $headerRole, null, 401);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
 }
 
-if ($currentUser !== 'marketer') {
-    jsonResponse(false, 'Unauthorized - Not a marketer. Current user: ' . $currentUser, null, 401);
+// Database connection - direct
+$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
+$dbPort = '27258';
+$dbName = 'defaultdb';
+$dbUser = 'avnadmin';
+$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+
+// Load JWT utility
+require_once __DIR__ . '/../jwt.php';
+
+// Authenticate using JWT
+$payload = JWT::authenticate();
+if (!$payload || $payload['user_type'] !== 'marketer') {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
+    exit;
 }
 
-$conn = getDBConnection();
-$marketerId = $_SESSION['marketer_id'] ?? null;
+// Get marketer ID from JWT payload
+$marketerId = $payload['marketer_id'];
 
-// If no session ID but have header auth, we need to look up the marketer
-if (!$marketerId && $headerRole === 'marketer') {
-    // For header-based auth, we need the marketer ID from somewhere
-    // This is a limitation - we need session for proper auth
-    error_log("Header auth but no session ID");
-}
-
-if (!$marketerId) {
-    jsonResponse(false, 'Session expired. Please login again.', null, 401);
+try {
+    $dsn = sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        $dbHost, $dbPort, $dbName
+    );
+    $conn = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+} catch (PDOException $e) {
+    error_log("DB Connection Error: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit;
 }
 
 // Get marketer's properties
-$stmt = $conn->prepare("SELECT * FROM properties WHERE marketer_id = ? ORDER BY created_at DESC");
+$stmt = $conn->prepare("SELECT * FROM properties WHERE marketer_id = ? ORDER BY id DESC");
 $stmt->execute([$marketerId]);
 $properties = $stmt->fetchAll();
 
@@ -60,4 +70,4 @@ foreach ($properties as &$property) {
     }
 }
 
-jsonResponse(true, 'Properties retrieved', $properties);
+echo json_encode(['success' => true, 'message' => 'Properties retrieved', 'data' => $properties]);
