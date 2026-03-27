@@ -1,137 +1,130 @@
 <?php
 /**
- * PlotConnect - Marketer Submit Property API (Standalone Version)
+ * Marketer Submit Property API (MongoDB)
  */
 
-// Enable error logging
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection - direct
-$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
-$dbPort = '27258';
-$dbName = 'defaultdb';
-$dbUser = 'avnadmin';
-$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+require_once __DIR__ . '/../mongo/config.php';
+ensureSession();
 
-// Load JWT utility
-require_once __DIR__ . '/../jwt.php';
+$response = ['success' => false, 'message' => ''];
 
-// Authenticate using JWT
-$payload = JWT::authenticate();
-if (!$payload || $payload['user_type'] !== 'marketer') {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
-    exit;
+function nextPropertyId($collection)
+{
+    $last = $collection->findOne([], ['sort' => ['_id' => -1], 'projection' => ['_id' => 1]]);
+    return $last ? (normalizeId($last['_id']) + 1) : 1;
 }
-
-// Get marketer ID from JWT payload
-$marketerId = $payload['marketer_id'];
 
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        $dbHost, $dbPort, $dbName
-    );
-    $conn = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    error_log("DB Connection Error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed: ' . $e->getMessage()]);
-    exit;
-}
+    $db = mongoDb();
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
-    exit;
-}
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        $response['message'] = 'Invalid request data';
+        echo json_encode($response);
+        exit;
+    }
 
-// Get input data
-$data = json_decode(file_get_contents('php://input'), true);
-
-if (!$data) {
-    echo json_encode(['success' => false, 'message' => 'No data received']);
-    exit;
-}
-
-$ownerName = htmlspecialchars(trim($data['owner_name'] ?? ''), ENT_QUOTES, 'UTF-8');
-$ownerEmail = htmlspecialchars(trim($data['owner_email'] ?? ''), ENT_QUOTES, 'UTF-8');
-$phoneNumber = htmlspecialchars(trim($data['phone_number'] ?? ''), ENT_QUOTES, 'UTF-8');
-$propertyName = htmlspecialchars(trim($data['property_name'] ?? ''), ENT_QUOTES, 'UTF-8');
-$propertyLocation = htmlspecialchars(trim($data['property_location'] ?? ''), ENT_QUOTES, 'UTF-8');
-$propertyType = $data['property_type'] ?? '';
-if (is_array($propertyType)) {
-    $propertyType = implode(', ', $propertyType);
-}
-$propertyType = htmlspecialchars(trim($propertyType), ENT_QUOTES, 'UTF-8');
-$propertyDescription = htmlspecialchars(trim($data['property_description'] ?? ''), ENT_QUOTES, 'UTF-8');
-$bookingType = htmlspecialchars(trim($data['booking_type'] ?? ''), ENT_QUOTES, 'UTF-8');
-$packageSelected = htmlspecialchars(trim($data['package_selected'] ?? ''), ENT_QUOTES, 'UTF-8');
-$rooms = $data['rooms'] ?? [];
-
-// Validate required fields
-if (empty($ownerName) || empty($phoneNumber) || empty($propertyLocation) || 
-    empty($propertyType) || empty($bookingType) || empty($packageSelected)) {
-    echo json_encode([
-        'success' => false, 
-        'message' => 'Please fill in all required fields',
-        'received' => [
-            'owner_name' => $ownerName,
-            'phone_number' => $phoneNumber,
-            'property_location' => $propertyLocation,
-            'property_type' => $propertyType,
-            'booking_type' => $bookingType,
-            'package_selected' => $packageSelected
-        ]
-    ]);
-    exit;
-}
-
-// Insert property
-try {
-    // Try with minimal columns - let the database tell us what's wrong
-    $stmt = $conn->prepare("INSERT INTO properties (marketer_id, owner_name, phone, property_name, property_location, property_type, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
-    $stmt->execute([$marketerId, $ownerName, $phoneNumber, $propertyName, $propertyLocation, $propertyType]);
-    $propertyId = $conn->lastInsertId();
-} catch (PDOException $e) {
-    error_log("Insert property error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Failed to insert property: ' . $e->getMessage()]);
-    exit;
-}
-
-// Insert room categories
-if (!empty($rooms)) {
-    try {
-        // Use property_rooms table as per database schema
-        $roomStmt = $conn->prepare("INSERT INTO property_rooms (property_id, room_type, room_size, price, availability) VALUES (?, ?, ?, ?, ?)");
-        
-        foreach ($rooms as $room) {
-            $roomType = htmlspecialchars(trim($room['room_type'] ?? ''), ENT_QUOTES, 'UTF-8');
-            $roomSize = htmlspecialchars(trim($room['room_size'] ?? ''), ENT_QUOTES, 'UTF-8');
-            $price = floatval($room['price'] ?? 0);
-            $availability = htmlspecialchars(trim($room['availability'] ?? ''), ENT_QUOTES, 'UTF-8');
-            
-            if (!empty($roomType) && $price > 0) {
-                $roomStmt->execute([$propertyId, $roomType, $roomSize, $price, $availability]);
+    $marketerId = isset($_SERVER['HTTP_X_AUTH_MARKETER_ID']) ? (int)$_SERVER['HTTP_X_AUTH_MARKETER_ID'] : 0;
+    if ($marketerId <= 0 && isset($_SESSION['marketer_id'])) {
+        $marketerId = normalizeId($_SESSION['marketer_id']);
+    }
+    if ($marketerId <= 0) {
+        $username = $_SERVER['HTTP_X_AUTH_USER'] ?? '';
+        if ($username !== '') {
+            $mk = $db->marketers->findOne(['$or' => [['name' => $username], ['email' => $username]]], ['projection' => ['_id' => 1]]);
+            if ($mk) {
+                $marketerId = normalizeId($mk['_id']);
             }
         }
-    } catch (PDOException $e) {
-        error_log("Insert rooms error: " . $e->getMessage());
     }
+
+    if ($marketerId <= 0) {
+        $response['message'] = 'Authentication required';
+        echo json_encode($response);
+        exit;
+    }
+
+    $ownerName = trim((string)($data['owner_name'] ?? ''));
+    $ownerEmail = trim((string)($data['owner_email'] ?? ''));
+    $phone = trim((string)($data['phone'] ?? ($data['phone_number'] ?? '')));
+    $propertyName = trim((string)($data['property_name'] ?? ''));
+    $county = trim((string)($data['county'] ?? ''));
+    $area = trim((string)($data['area'] ?? ''));
+    $propertyType = is_array($data['property_type'] ?? null)
+        ? implode(', ', array_filter(array_map('trim', $data['property_type'])))
+        : trim((string)($data['property_type'] ?? ''));
+    $bookingType = trim((string)($data['booking_type'] ?? ''));
+    $packageSelected = trim((string)($data['package_selected'] ?? ''));
+    $propertyLocation = $area !== '' ? $area : trim((string)($data['property_location'] ?? ''));
+
+    if ($ownerName === '' || $propertyName === '' || $county === '' || $area === '' || $propertyType === '' || $bookingType === '' || $packageSelected === '') {
+        $response['message'] = 'Missing required property fields';
+        echo json_encode($response);
+        exit;
+    }
+
+    $roomsDocs = [];
+    if (isset($data['rooms']) && is_array($data['rooms'])) {
+        foreach ($data['rooms'] as $room) {
+            $roomType = trim((string)($room['room_type'] ?? ''));
+            $roomSize = trim((string)($room['room_size'] ?? ''));
+            $price = isset($room['price']) ? (float)$room['price'] : 0;
+            $availability = trim((string)($room['availability'] ?? ''));
+            if ($roomType !== '') {
+                $roomsDocs[] = [
+                    'room_type' => $roomType,
+                    'room_size' => $roomSize,
+                    'price' => $price,
+                    'availability' => $availability,
+                ];
+            }
+        }
+    }
+
+    $collection = $db->properties;
+    $newId = nextPropertyId($collection);
+
+    $collection->insertOne([
+        '_id' => $newId,
+        'marketer_id' => $marketerId,
+        'owner_name' => $ownerName,
+        'owner_email' => $ownerEmail,
+        'phone' => $phone,
+        'property_name' => $propertyName,
+        'property_location' => $propertyLocation,
+        'property_type' => $propertyType,
+        'booking_type' => $bookingType,
+        'package_selected' => $packageSelected,
+        'county' => $county,
+        'area' => $area,
+        'status' => 'pending',
+        'rooms' => $roomsDocs,
+        'created_at' => mongoNow(),
+    ]);
+
+    // New submissions should become visible to marketers again
+    $db->app_settings->updateOne(
+        ['_id' => 'marketer_properties_hidden'],
+        ['$set' => ['value' => 0, 'updated_at' => mongoNow()]],
+        ['upsert' => true]
+    );
+
+    $response['success'] = true;
+    $response['message'] = 'Property submitted successfully!';
+    $response['data'] = ['property_id' => $newId];
+} catch (Throwable $e) {
+    $response['message'] = 'Database error: ' . $e->getMessage();
+    error_log('Submit Property Error: ' . $e->getMessage());
 }
 
-echo json_encode(['success' => true, 'message' => 'Property submitted successfully', 'property_id' => $propertyId]);
+echo json_encode($response);

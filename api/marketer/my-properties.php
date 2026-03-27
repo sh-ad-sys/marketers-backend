@@ -1,73 +1,81 @@
 <?php
 /**
- * PlotConnect - Marketer My Properties API (Standalone)
+ * My Properties API (MongoDB)
  */
 
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection - direct
-$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
-$dbPort = '27258';
-$dbName = 'defaultdb';
-$dbUser = 'avnadmin';
-$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+require_once __DIR__ . '/../mongo/config.php';
+ensureSession();
 
-// Load JWT utility
-require_once __DIR__ . '/../jwt.php';
-
-// Authenticate using JWT
-$payload = JWT::authenticate();
-if (!$payload || $payload['user_type'] !== 'marketer') {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
-    exit;
-}
-
-// Get marketer ID from JWT payload
-$marketerId = $payload['marketer_id'];
+$response = ['success' => false, 'message' => '', 'data' => []];
 
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        $dbHost, $dbPort, $dbName
-    );
-    $conn = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    error_log("DB Connection Error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    exit;
-}
+    $db = mongoDb();
 
-// Get marketer's properties
-$stmt = $conn->prepare("SELECT * FROM properties WHERE marketer_id = ? ORDER BY id DESC");
-$stmt->execute([$marketerId]);
-$properties = $stmt->fetchAll();
+    $marketerId = isset($_SERVER['HTTP_X_AUTH_MARKETER_ID']) ? (int)$_SERVER['HTTP_X_AUTH_MARKETER_ID'] : 0;
 
-foreach ($properties as &$property) {
-    // Get room categories for each property
-    try {
-        $roomStmt = $conn->prepare("SELECT * FROM property_rooms WHERE property_id = ?");
-        $roomStmt->execute([$property['id']]);
-        $property['rooms'] = $roomStmt->fetchAll();
-    } catch (Exception $e) {
-        $property['rooms'] = [];
+    if ($marketerId <= 0 && isset($_SESSION['marketer_id'])) {
+        $marketerId = normalizeId($_SESSION['marketer_id']);
     }
+
+    if ($marketerId <= 0) {
+        $username = $_SERVER['HTTP_X_AUTH_USER'] ?? '';
+        if ($username !== '') {
+            $mk = $db->marketers->findOne(['$or' => [['name' => $username], ['email' => $username]]], ['projection' => ['_id' => 1]]);
+            if ($mk) {
+                $marketerId = normalizeId($mk['_id']);
+            }
+        }
+    }
+
+    if ($marketerId <= 0) {
+        $response['message'] = 'Authentication required';
+        echo json_encode($response);
+        exit;
+    }
+
+    $settings = $db->app_settings->findOne(['_id' => 'marketer_properties_hidden']);
+    $hidden = $settings && isset($settings['value']) && (int)$settings['value'] === 1;
+
+    $properties = [];
+    if (!$hidden) {
+        $cursor = $db->properties->find(['marketer_id' => $marketerId], ['sort' => ['created_at' => -1, '_id' => -1]]);
+        foreach ($cursor as $p) {
+            $properties[] = [
+                'id' => normalizeId($p['_id'] ?? 0),
+                'marketer_id' => normalizeId($p['marketer_id'] ?? 0),
+                'owner_name' => (string)($p['owner_name'] ?? ''),
+                'owner_email' => (string)($p['owner_email'] ?? ''),
+                'phone' => (string)($p['phone'] ?? ''),
+                'property_name' => (string)($p['property_name'] ?? ''),
+                'property_location' => (string)($p['property_location'] ?? ''),
+                'property_type' => (string)($p['property_type'] ?? ''),
+                'booking_type' => (string)($p['booking_type'] ?? ''),
+                'package_selected' => (string)($p['package_selected'] ?? ''),
+                'county' => (string)($p['county'] ?? ''),
+                'area' => (string)($p['area'] ?? ''),
+                'status' => (string)($p['status'] ?? 'pending'),
+                'rooms' => $p['rooms'] ?? [],
+                'created_at' => mongoDateToString($p['created_at'] ?? null),
+            ];
+        }
+    }
+
+    $response['success'] = true;
+    $response['hidden'] = $hidden;
+    $response['data'] = $properties;
+} catch (Throwable $e) {
+    $response['message'] = 'Database error: ' . $e->getMessage();
+    error_log('Get Properties Error: ' . $e->getMessage());
 }
 
-echo json_encode(['success' => true, 'message' => 'Properties retrieved', 'data' => $properties]);
+echo json_encode($response);

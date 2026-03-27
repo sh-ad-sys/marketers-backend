@@ -26,7 +26,7 @@ class JWT {
         $payloadEncoded = base64_encode(json_encode($payload));
         
         // Create signature
-        $signature = hash_hmac('sha256', $header . '.' . $payloadEncoded, JWT_SECRET);
+        $signature = hash_hmac('sha256', $header . '.' . $payloadEncoded, JWT_SECRET, true);
         $signatureEncoded = base64_encode($signature);
         
         // Return token
@@ -49,7 +49,7 @@ class JWT {
         list($header, $payload, $signature) = $parts;
         
         // Verify signature
-        $expectedSignature = base64_encode(hash_hmac('sha256', $header . '.' . $payload, JWT_SECRET));
+        $expectedSignature = base64_encode(hash_hmac('sha256', $header . '.' . $payload, JWT_SECRET, true));
         
         if ($signature !== $expectedSignature) {
             return false;

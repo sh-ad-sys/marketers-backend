@@ -1,134 +1,123 @@
 <?php
 /**
- * PlotConnect - Admin Properties Management API (Standalone)
+ * Admin Properties API (MongoDB)
  */
 
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection - direct
-$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
-$dbPort = '27258';
-$dbName = 'defaultdb';
-$dbUser = 'avnadmin';
-$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+require_once __DIR__ . '/../mongo/config.php';
 
-// Load JWT utility
-require_once __DIR__ . '/../jwt.php';
-
-// Authenticate using JWT
-$payload = JWT::authenticate();
-if (!$payload || $payload['user_type'] !== 'admin') {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
-    exit;
-}
+$response = ['success' => false, 'message' => '', 'data' => []];
 
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        $dbHost, $dbPort, $dbName
-    );
-    $conn = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    error_log("DB Connection Error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    exit;
-}
-
-$method = $_SERVER['REQUEST_METHOD'];
-
-if ($method === 'GET') {
-    // Get all properties with marketer info
-    $marketerId = isset($_GET['marketer_id']) ? (int)$_GET['marketer_id'] : null;
-    
-    try {
-        if ($marketerId) {
-            $stmt = $conn->prepare("SELECT p.*, m.name as marketer_name, m.phone as marketer_phone 
-                                    FROM properties p 
-                                    JOIN marketers m ON p.marketer_id = m.id 
-                                    WHERE p.marketer_id = ?
-                                    ORDER BY p.id DESC");
-            $stmt->execute([$marketerId]);
-        } else {
-            $stmt = $conn->query("SELECT p.*, m.name as marketer_name, m.phone as marketer_phone 
-                                    FROM properties p 
-                                    JOIN marketers m ON p.marketer_id = m.id 
-                                    ORDER BY p.id DESC");
-        }
-        
-        $properties = $stmt->fetchAll();
-        
-        foreach ($properties as &$property) {
-            // Get room categories for each property
-            try {
-                $roomStmt = $conn->prepare("SELECT * FROM property_rooms WHERE property_id = ?");
-                $roomStmt->execute([$property['id']]);
-                $property['rooms'] = $roomStmt->fetchAll();
-            } catch (Exception $e) {
-                $property['rooms'] = [];
-            }
-        }
-        
-        echo json_encode(['success' => true, 'message' => 'Properties retrieved', 'data' => $properties]);
-        
-    } catch (PDOException $e) {
-        error_log("Get properties error: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Failed to get properties: ' . $e->getMessage()]);
+    $role = $_SERVER['HTTP_X_AUTH_ROLE'] ?? '';
+    if ($role !== 'admin') {
+        $response['message'] = 'Admin access required';
+        echo json_encode($response);
+        exit;
     }
-    
-} elseif ($method === 'POST') {
-    $data = json_decode(file_get_contents('php://input'), true);
-    $action = $data['action'] ?? '';
-    
+
+    $db = mongoDb();
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $marketerMap = [];
+        foreach ($db->marketers->find([], ['projection' => ['_id' => 1, 'name' => 1, 'phone' => 1]]) as $m) {
+            $marketerMap[normalizeId($m['_id'])] = [
+                'name' => (string)($m['name'] ?? ''),
+                'phone' => (string)($m['phone'] ?? ''),
+            ];
+        }
+
+        $cursor = $db->properties->find([], ['sort' => ['created_at' => -1, '_id' => -1]]);
+        $properties = [];
+        foreach ($cursor as $p) {
+            $marketerId = normalizeId($p['marketer_id'] ?? 0);
+            $mk = $marketerMap[$marketerId] ?? ['name' => 'Unknown', 'phone' => ''];
+            $properties[] = [
+                'id' => normalizeId($p['_id'] ?? 0),
+                'marketer_id' => $marketerId,
+                'owner_name' => (string)($p['owner_name'] ?? ''),
+                'owner_email' => (string)($p['owner_email'] ?? ''),
+                'phone' => (string)($p['phone'] ?? ''),
+                'property_name' => (string)($p['property_name'] ?? ''),
+                'property_location' => (string)($p['property_location'] ?? ''),
+                'property_type' => (string)($p['property_type'] ?? ''),
+                'booking_type' => (string)($p['booking_type'] ?? ''),
+                'package_selected' => (string)($p['package_selected'] ?? ''),
+                'county' => (string)($p['county'] ?? ''),
+                'area' => (string)($p['area'] ?? ''),
+                'status' => (string)($p['status'] ?? 'pending'),
+                'rooms' => $p['rooms'] ?? [],
+                'created_at' => mongoDateToString($p['created_at'] ?? null),
+                'marketer_name' => $mk['name'],
+                'marketer_phone' => $mk['phone'],
+            ];
+        }
+
+        $response['success'] = true;
+        $response['data'] = $properties;
+        echo json_encode($response);
+        exit;
+    }
+
+    $data = json_decode(file_get_contents('php://input'), true) ?? $_REQUEST;
+    $action = trim($data['action'] ?? '');
+
+    if ($action === 'delete') {
+        $id = (int)($data['id'] ?? 0);
+        if ($id <= 0) {
+            $response['message'] = 'Invalid property ID';
+            echo json_encode($response);
+            exit;
+        }
+
+        $db->properties->deleteOne(['_id' => $id]);
+        $response['success'] = true;
+        $response['message'] = 'Property deleted successfully';
+        echo json_encode($response);
+        exit;
+    }
+
     if ($action === 'update_status') {
-        $id = isset($data['id']) ? (int)$data['id'] : 0;
-        $status = htmlspecialchars(trim($data['status'] ?? ''), ENT_QUOTES, 'UTF-8');
-        
-        if ($id === 0 || empty($status)) {
-            echo json_encode(['success' => false, 'message' => 'Invalid data']);
+        $id = (int)($data['id'] ?? 0);
+        $status = trim($data['status'] ?? '');
+        if ($id <= 0 || !in_array($status, ['pending', 'approved', 'rejected'], true)) {
+            $response['message'] = 'Invalid property ID or status';
+            echo json_encode($response);
             exit;
         }
-        
-        try {
-            $stmt = $conn->prepare("UPDATE properties SET status = ? WHERE id = ?");
-            $stmt->execute([$status, $id]);
-            echo json_encode(['success' => true, 'message' => 'Property status updated']);
-        } catch (PDOException $e) {
-            echo json_encode(['success' => false, 'message' => 'Failed to update status']);
-        }
-        
-    } elseif ($action === 'delete') {
-        $id = isset($data['id']) ? (int)$data['id'] : 0;
-        
-        if ($id === 0) {
-            echo json_encode(['success' => false, 'message' => 'Invalid property ID']);
-            exit;
-        }
-        
-        try {
-            $stmt = $conn->prepare("DELETE FROM properties WHERE id = ?");
-            $stmt->execute([$id]);
-            echo json_encode(['success' => true, 'message' => 'Property deleted successfully']);
-        } catch (PDOException $e) {
-            echo json_encode(['success' => false, 'message' => 'Failed to delete property']);
-        }
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Invalid action']);
+
+        $db->properties->updateOne(['_id' => $id], ['$set' => ['status' => $status]]);
+        $response['success'] = true;
+        $response['message'] = 'Property status updated successfully';
+        echo json_encode($response);
+        exit;
     }
+
+    if ($action === 'refresh_user_plots') {
+        $db->app_settings->updateOne(
+            ['_id' => 'marketer_properties_hidden'],
+            ['$set' => ['value' => 1, 'updated_at' => mongoNow()]],
+            ['upsert' => true]
+        );
+        $response['success'] = true;
+        $response['message'] = 'User properties refreshed';
+        echo json_encode($response);
+        exit;
+    }
+
+    $response['message'] = 'Invalid action';
+} catch (Throwable $e) {
+    $response['message'] = 'Database error: ' . $e->getMessage();
+    error_log('Properties API Error: ' . $e->getMessage());
 }
+
+echo json_encode($response);

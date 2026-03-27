@@ -1,83 +1,57 @@
 <?php
 /**
- * PlotConnect - Marketer Delete Property API (Standalone)
+ * Delete marketer property API (MongoDB)
  */
 
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection - direct
-$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
-$dbPort = '27258';
-$dbName = 'defaultdb';
-$dbUser = 'avnadmin';
-$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+require_once __DIR__ . '/../mongo/config.php';
+ensureSession();
 
-// Load JWT utility
-require_once __DIR__ . '/../jwt.php';
-
-// Authenticate using JWT
-$payload = JWT::authenticate();
-if (!$payload || $payload['user_type'] !== 'marketer') {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized - Invalid or missing token']);
-    exit;
-}
-
-// Get marketer ID from JWT payload
-$marketerId = $payload['marketer_id'];
-
-try {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        $dbHost, $dbPort, $dbName
-    );
-    $conn = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    error_log("DB Connection Error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    exit;
-}
+$response = ['success' => false, 'message' => ''];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
+    http_response_code(405);
+    $response['message'] = 'Invalid request method';
+    echo json_encode($response);
     exit;
 }
 
-$data = json_decode(file_get_contents('php://input'), true);
-$propertyId = intval($data['id'] ?? 0);
+try {
+    $db = mongoDb();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $propertyId = (int)($data['id'] ?? 0);
 
-if ($propertyId === 0) {
-    echo json_encode(['success' => false, 'message' => 'Invalid property ID']);
-    exit;
+    $marketerId = isset($_SERVER['HTTP_X_AUTH_MARKETER_ID']) ? (int)$_SERVER['HTTP_X_AUTH_MARKETER_ID'] : 0;
+    if ($marketerId <= 0 && isset($_SESSION['marketer_id'])) {
+        $marketerId = normalizeId($_SESSION['marketer_id']);
+    }
+
+    if ($propertyId <= 0 || $marketerId <= 0) {
+        $response['message'] = 'Invalid property or user';
+        echo json_encode($response);
+        exit;
+    }
+
+    $result = $db->properties->deleteOne(['_id' => $propertyId, 'marketer_id' => $marketerId]);
+    if ($result->getDeletedCount() === 0) {
+        $response['message'] = 'Property not found or not allowed';
+        echo json_encode($response);
+        exit;
+    }
+
+    $response['success'] = true;
+    $response['message'] = 'Property deleted successfully';
+} catch (Throwable $e) {
+    $response['message'] = 'Database error: ' . $e->getMessage();
 }
 
-// Verify property belongs to this marketer
-$stmt = $conn->prepare("SELECT id FROM properties WHERE id = ? AND marketer_id = ?");
-$stmt->execute([$propertyId, $marketerId]);
-
-if ($stmt->rowCount() === 0) {
-    echo json_encode(['success' => false, 'message' => 'Property not found or unauthorized']);
-    exit;
-}
-
-// Delete property
-$delStmt = $conn->prepare("DELETE FROM properties WHERE id = ?");
-$delStmt->execute([$propertyId]);
-
-echo json_encode(['success' => true, 'message' => 'Property deleted successfully']);
+echo json_encode($response);

@@ -1,245 +1,151 @@
 <?php
 /**
- * PlotConnect - Login API (Standalone)
+ * Login API (MongoDB)
  */
 
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, Accept, Authorization');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Database connection - direct
-$dbHost = 'plotconnect-shadrackmutua081-64f3.k.aivencloud.com';
-$dbPort = '27258';
-$dbName = 'defaultdb';
-$dbUser = 'avnadmin';
-$dbPass = 'AVNS_Q-OTx-X8_9pxJLFsNY4';
+require_once __DIR__ . '/../mongo/config.php';
 
-// Load JWT utility
-require_once __DIR__ . '/../jwt.php';
+$response = ['success' => false, 'message' => ''];
+ensureSession();
 
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        $dbHost, $dbPort, $dbName
-    );
-    $conn = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    error_log("DB Connection Error: " . $e->getMessage());
-    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    exit;
-}
+    $db = mongoDb();
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(["success" => false, "message" => "Invalid request method"]);
-    exit;
-}
-
-$data = json_decode(file_get_contents('php://input'), true);
-
-if (!$data) {
-    echo json_encode(["success" => false, "message" => "Invalid JSON input"]);
-    exit;
-}
-
-$type     = $data['type']     ?? '';
-
-// Validate based on type - admin needs password, marketer needs email+phone+otp or just email+phone for request_otp
-if (empty($type)) {
-    echo json_encode(["success" => false, "message" => "Please fill in all required fields"]);
-    exit;
-}
-
-// For admin login, password is required
-if ($type === 'admin' && empty($data['password'])) {
-    echo json_encode(["success" => false, "message" => "Please fill in all required fields"]);
-    exit;
-}
-
-// For marketer login, email and phone are required
-if (($type === 'marketer' || $type === 'request_otp') && (empty($data['email']) || empty($data['phone']))) {
-    echo json_encode(["success" => false, "message" => "Please fill in all required fields"]);
-    exit;
-}
-
-/**
- * ========================
- * ADMIN LOGIN
- * ========================
- */
-if ($type === 'admin') {
-    $email = $data['email'] ?? '';
-    $password = $data['password'] ?? '';
-
-    if (empty($email)) {
-        echo json_encode(["success" => false, "message" => "Email is required"]);
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        $response['message'] = 'Invalid request data';
+        echo json_encode($response);
         exit;
     }
 
-    // Check against admins table in database
-    $stmt = $conn->prepare("SELECT id, username, password, full_name, email FROM admins WHERE email = ?");
-    $stmt->execute([$email]);
-    $admin = $stmt->fetch();
+    $type = trim($data['type'] ?? '');
+    $email = trim($data['email'] ?? '');
+    $phone = trim($data['phone'] ?? '');
+    $password = (string)($data['password'] ?? '');
 
-    if ($admin && password_verify($password, $admin['password'])) {
-        // Generate JWT token
-        $token = JWT::create([
-            'user_type' => 'admin',
-            'username' => $admin['username'],
-            'id' => $admin['id']
+    if ($type === 'admin') {
+        if ($email === '' || $password === '') {
+            $response['message'] = 'Email and password are required';
+            echo json_encode($response);
+            exit;
+        }
+
+        $admin = $db->admins->findOne([
+            '$or' => [
+                ['username' => $email],
+                ['email' => $email],
+            ],
         ]);
-        
-        echo json_encode([
-            "success" => true,
-            "message" => "Login successful",
-            "token"    => $token,
-            "data"    => [
-                "user_type" => "admin",
-                "email"  => $admin['email'],
-                "name"      => $admin['full_name']
-            ]
+
+        if ($admin && password_verify($password, (string)($admin['password'] ?? ''))) {
+            $token = bin2hex(random_bytes(32));
+
+            $_SESSION['user_id'] = normalizeId($admin['_id'] ?? $admin['id'] ?? 0);
+            $_SESSION['username'] = (string)($admin['username'] ?? '');
+            $_SESSION['full_name'] = (string)($admin['full_name'] ?? '');
+            $_SESSION['user_type'] = 'admin';
+            $_SESSION['token'] = $token;
+
+            $response['success'] = true;
+            $response['message'] = 'Login successful';
+            $response['data'] = [
+                'id' => normalizeId($admin['_id'] ?? $admin['id'] ?? 0),
+                'username' => (string)($admin['username'] ?? ''),
+                'full_name' => (string)($admin['full_name'] ?? ''),
+                'email' => (string)($admin['email'] ?? ''),
+                'user_type' => 'admin',
+                'token' => $token,
+            ];
+        } else {
+            $response['message'] = 'Invalid admin credentials';
+        }
+
+        echo json_encode($response);
+        exit;
+    }
+
+    // marketer login
+    if (($email === '' && $phone === '') || $password === '') {
+        $response['message'] = 'Email or phone number and password are required';
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($email !== '') {
+        $marketer = $db->marketers->findOne([
+            '$or' => [
+                ['email' => $email],
+                ['name' => $email],
+            ],
         ]);
-    } elseif (!$admin) {
-        echo json_encode(["success" => false, "message" => "Admin email not found"]);
     } else {
-        echo json_encode(["success" => false, "message" => "Incorrect password"]);
+        $marketer = $db->marketers->findOne(['phone' => $phone]);
     }
-    exit;
-}
 
-/**
- * ========================
- * MARKETER LOGIN (OTP)
- * ========================
- */
-if ($type === 'marketer') {
-    $email  = $data['email']  ?? '';
-    $phone = $data['phone'] ?? '';
-    $otp = $data['otp'] ?? '';
-
-    if (empty($email) || empty($phone) || empty($otp)) {
-        echo json_encode(["success" => false, "message" => "Email, phone number and OTP are required"]);
+    if (!$marketer) {
+        $response['message'] = 'Invalid marketer credentials';
+        echo json_encode($response);
         exit;
     }
 
-    // First check if email exists
-    $emailStmt = $conn->prepare("SELECT id, name, phone, email FROM marketers WHERE email = ?");
-    $emailStmt->execute([$email]);
-    $marketerByEmail = $emailStmt->fetch();
-    
-    if (!$marketerByEmail) {
-        echo json_encode(["success" => false, "message" => "Email not found. Please check your email address."]);
+    $isActive = isset($marketer['is_active']) ? (int)$marketer['is_active'] : 1;
+    if ($isActive !== 1) {
+        $response['message'] = 'Your account is inactive.';
+        echo json_encode($response);
         exit;
     }
 
-    // Check if phone matches
-    if ($marketerByEmail['phone'] !== $phone) {
-        echo json_encode(["success" => false, "message" => "Phone number does not match our records for this email."]);
+    if (isset($marketer['is_blocked']) && (int)$marketer['is_blocked'] === 1) {
+        $response['message'] = 'Your account has been blocked. Please contact admin.';
+        echo json_encode($response);
         exit;
     }
 
-    // Now get the full marketer record with OTP
-    $stmt = $conn->prepare("SELECT id, name, phone, email, otp_code, otp_expiry FROM marketers WHERE id = ?");
-    $stmt->execute([$marketerByEmail['id']]);
-    $result = $stmt->fetch();
-
-    // Verify OTP
-    require_once __DIR__ . '/../otp.php';
-    
-    if (!OTP::verify($otp, $result['otp_code'])) {
-        echo json_encode(["success" => false, "message" => "Invalid OTP. Please check the OTP sent to your email."]);
+    if (!password_verify($password, (string)($marketer['password'] ?? ''))) {
+        $response['message'] = 'Invalid marketer credentials';
+        echo json_encode($response);
         exit;
     }
 
-    // Check if OTP is expired
-    if (OTP::isExpired($result['otp_expiry'])) {
-        echo json_encode(["success" => false, "message" => "OTP has expired. Please request a new one."]);
-        exit;
-    }
+    $token = bin2hex(random_bytes(32));
+    $marketerId = normalizeId($marketer['_id'] ?? $marketer['id'] ?? 0);
 
-    // Generate JWT token
-    $token = JWT::create([
+    $_SESSION['user_id'] = $marketerId;
+    $_SESSION['username'] = (string)($marketer['name'] ?? '');
+    $_SESSION['full_name'] = (string)($marketer['name'] ?? '');
+    $_SESSION['user_type'] = 'marketer';
+    $_SESSION['marketer_id'] = $marketerId;
+    $_SESSION['phone'] = (string)($marketer['phone'] ?? '');
+    $_SESSION['token'] = $token;
+
+    $response['success'] = true;
+    $response['message'] = 'Login successful';
+    $response['data'] = [
+        'id' => $marketerId,
+        'marketer_id' => $marketerId,
+        'name' => (string)($marketer['name'] ?? ''),
+        'email' => (string)($marketer['email'] ?? ''),
+        'phone' => (string)($marketer['phone'] ?? ''),
         'user_type' => 'marketer',
-        'marketer_id' => $result['id'],
-        'name' => $result['name']
-    ]);
-    
-    echo json_encode([
-        "success" => true,
-        "message" => "Login successful",
-        "token"    => $token,
-        "data"    => [
-            "user_type" => "marketer",
-            "name"      => $result['name'],
-            "phone"     => $result['phone'],
-            "marketer_id" => $result['id']
-        ]
-    ]);
-    exit;
+        'token' => $token,
+        'is_authorized' => isset($marketer['is_authorized']) ? (int)$marketer['is_authorized'] : 0,
+        'is_blocked' => isset($marketer['is_blocked']) ? (int)$marketer['is_blocked'] : 0,
+        'must_change_password' => isset($marketer['must_change_password']) ? (int)$marketer['must_change_password'] : 0,
+    ];
+
+} catch (Throwable $e) {
+    $response['message'] = 'Error: ' . $e->getMessage();
+    error_log('Login Error: ' . $e->getMessage());
 }
 
-/**
- * ========================
- * REQUEST OTP (For marketers who haven't received one)
- * ========================
- */
-if ($type === 'request_otp') {
-    $email  = $data['email']  ?? '';
-    $phone = $data['phone'] ?? '';
-
-    if (empty($email) || empty($phone)) {
-        echo json_encode(["success" => false, "message" => "Email and phone number are required"]);
-        exit;
-    }
-
-    // First check if email exists (without is_active check first to debug)
-    $emailStmt = $conn->prepare("SELECT id, name, phone, email FROM marketers WHERE email = ?");
-    $emailStmt->execute([$email]);
-    $marketerByEmail = $emailStmt->fetch();
-    
-    if (!$marketerByEmail) {
-        echo json_encode(["success" => false, "message" => "Email not found. Please check your email address."]);
-        exit;
-    }
-
-    // Check if phone matches
-    if ($marketerByEmail['phone'] !== $phone) {
-        echo json_encode(["success" => false, "message" => "Phone number does not match our records for this email."]);
-        exit;
-    }
-
-    // Generate new OTP
-    require_once __DIR__ . '/../otp.php';
-    require_once __DIR__ . '/../email.php';
-    
-    $newOtp = OTP::generate();
-    $hashedOtp = OTP::hash($newOtp);
-    $otpExpiry = OTP::getExpiry();
-    
-    // Update OTP in database
-    $updateStmt = $conn->prepare("UPDATE marketers SET otp_code = ?, otp_expiry = ? WHERE id = ?");
-    $updateStmt->execute([$hashedOtp, $otpExpiry, $marketerByEmail['id']]);
-    
-    // Send OTP via email
-    $emailSent = Email::sendOTP($marketerByEmail['email'], $marketerByEmail['name'], $newOtp);
-    
-    // For testing, we'll succeed even if email fails (remove in production)
-    echo json_encode(["success" => true, "message" => "OTP sent to your email"]);
-    exit;
-}
-
-echo json_encode(["success" => false, "message" => "Invalid user type"]);
+echo json_encode($response);
