@@ -6,6 +6,41 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
+function normalizeEnvFileValue(string $value): string {
+    $trimmed = trim($value);
+    $length = strlen($trimmed);
+
+    if ($length >= 2) {
+        $first = $trimmed[0];
+        $last = $trimmed[$length - 1];
+        if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+            $trimmed = substr($trimmed, 1, -1);
+        }
+    }
+
+    return $trimmed;
+}
+
+function envVarAlreadyDefined(string $key): bool {
+    if (array_key_exists($key, $_ENV) && trim((string)$_ENV[$key]) !== '') {
+        return true;
+    }
+
+    $value = getenv($key);
+    return $value !== false && trim((string)$value) !== '';
+}
+
+function runningOnRender(): bool {
+    foreach (['RENDER', 'RENDER_EXTERNAL_URL', 'RENDER_SERVICE_ID'] as $key) {
+        $value = getenv($key);
+        if ($value !== false && trim((string)$value) !== '') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // ── Load .env ────────────────────────────────────────────────────────────────
 // For local development, try multiple possible .env locations
 $possibleEnvFiles = [
@@ -25,14 +60,23 @@ foreach ($possibleEnvFiles as $file) {
 
 // Also check if we're on Render (environment variables are set in Render dashboard)
 // If RENDER flag is set, skip .env file
-if (file_exists($envFile)) {
+if (!runningOnRender() && $envFile && file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
-        if (strpos(trim($line), '#') === 0) continue;
+        $trimmedLine = trim($line);
+        if ($trimmedLine === '' || strpos($trimmedLine, '#') === 0) {
+            continue;
+        }
+
         if (strpos($line, '=') !== false) {
             [$key, $value] = explode('=', $line, 2);
             $k = trim($key);
-            $v = trim($value);
+
+            if ($k === '' || !preg_match('/^[A-Z0-9_]+$/i', $k) || envVarAlreadyDefined($k)) {
+                continue;
+            }
+
+            $v = normalizeEnvFileValue($value);
             $_ENV[$k] = $v;
             putenv("$k=$v");
         }
