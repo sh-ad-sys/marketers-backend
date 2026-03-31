@@ -25,9 +25,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
-    $db = mongoDb();
-    ensurePasswordResetTable($db);
-
     $data = json_decode(file_get_contents('php://input'), true);
     $type = trim($data['type'] ?? '');
     $email = trim($data['email'] ?? '');
@@ -44,45 +41,100 @@ try {
         exit;
     }
 
-    $collection = $type === 'admin' ? $db->admins : $db->marketers;
-    $user = $collection->findOne(['email' => $email]);
+    if (passwordResetUsesMongoStorage()) {
+        $db = mongoDb();
+        ensurePasswordResetTable($db);
 
-    if (!$user) {
-        $response['success'] = false;
-        $response['message'] = 'Email does not match any ' . $type . ' account.';
-        echo json_encode($response);
-        exit;
+        $collection = $type === 'admin' ? $db->admins : $db->marketers;
+        $user = $collection->findOne(['email' => $email]);
+
+        if (!$user) {
+            $response['success'] = false;
+            $response['message'] = 'Email does not match any ' . $type . ' account.';
+            echo json_encode($response);
+            exit;
+        }
+
+        $userId = normalizeId($user['_id'] ?? 0);
+        $token = randomToken(64);
+        $tokenHash = password_hash($token, PASSWORD_DEFAULT);
+        $expiresAt = new MongoDB\BSON\UTCDateTime((time() + 1800) * 1000);
+
+        $db->password_resets->updateMany(
+            ['user_type' => $type, 'user_id' => $userId, 'used_at' => null],
+            ['$set' => ['used_at' => mongoNow()]]
+        );
+
+        $resetId = nextResetId($db->password_resets);
+        $db->password_resets->insertOne([
+            '_id' => $resetId,
+            'user_type' => $type,
+            'user_id' => $userId,
+            'email' => $email,
+            'token_hash' => $tokenHash,
+            'expires_at' => $expiresAt,
+            'used_at' => null,
+            'created_at' => mongoNow(),
+        ]);
+
+        $displayName = (string)($user['name'] ?? $user['full_name'] ?? 'User');
+    } else {
+        $conn = apiMysql();
+        ensurePasswordResetTable($conn);
+
+        if ($type === 'admin') {
+            $stmt = $conn->prepare('
+                SELECT id, full_name, username, email
+                FROM admins
+                WHERE email = ?
+                LIMIT 1
+            ');
+            $stmt->execute([$email]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $conn->prepare('
+                SELECT id, name, email
+                FROM marketers
+                WHERE email = ?
+                LIMIT 1
+            ');
+            $stmt->execute([$email]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        if (!$user) {
+            $response['success'] = false;
+            $response['message'] = 'Email does not match any ' . $type . ' account.';
+            echo json_encode($response);
+            exit;
+        }
+
+        $userId = (int)($user['id'] ?? 0);
+        $token = randomToken(64);
+        $tokenHash = password_hash($token, PASSWORD_DEFAULT);
+        $expiresAt = date('Y-m-d H:i:s', time() + 1800);
+
+        $markUsed = $conn->prepare('
+            UPDATE password_resets
+            SET used_at = NOW()
+            WHERE user_type = ?
+              AND user_id = ?
+              AND used_at IS NULL
+        ');
+        $markUsed->execute([$type, $userId]);
+
+        $insertReset = $conn->prepare('
+            INSERT INTO password_resets (user_type, user_id, email, token_hash, expires_at, used_at, created_at)
+            VALUES (?, ?, ?, ?, ?, NULL, NOW())
+        ');
+        $insertReset->execute([$type, $userId, $email, $tokenHash, $expiresAt]);
+
+        $displayName = (string)($user['name'] ?? $user['full_name'] ?? $user['username'] ?? 'User');
     }
 
-    $userId = normalizeId($user['_id'] ?? 0);
-    $token = randomToken(64);
-    $tokenHash = password_hash($token, PASSWORD_DEFAULT);
-    $expiresAt = new MongoDB\BSON\UTCDateTime((time() + 1800) * 1000);
-
-    $db->password_resets->updateMany(
-        ['user_type' => $type, 'user_id' => $userId, 'used_at' => null],
-        ['$set' => ['used_at' => mongoNow()]]
-    );
-
-    $resetId = nextResetId($db->password_resets);
-    $db->password_resets->insertOne([
-        '_id' => $resetId,
-        'user_type' => $type,
-        'user_id' => $userId,
-        'email' => $email,
-        'token_hash' => $tokenHash,
-        'expires_at' => $expiresAt,
-        'used_at' => null,
-        'created_at' => mongoNow(),
-    ]);
-
-    $adminResetBase = rtrim(loadEnvValue('RESET_ADMIN_URL', 'http://localhost:3001/reset-password'), '/');
-    $userResetBase = rtrim(loadEnvValue('RESET_USER_URL', 'http://localhost:3000/reset-password'), '/');
-    $base = $type === 'admin' ? $adminResetBase : $userResetBase;
-
+    $base = passwordResetResolveBaseUrl($type);
     $resetLink = $base . '?token=' . urlencode($token) . '&email=' . urlencode($email) . '&type=' . urlencode($type);
 
-    $displayName = (string)($user['name'] ?? $user['full_name'] ?? 'User');
     $subject = 'PlotConnect Password Reset';
     $html = '<p>Hello ' . htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8') . ',</p>'
       . '<p>You requested a password reset. Click the link below to set a new password:</p>'
@@ -98,7 +150,7 @@ try {
 } catch (Throwable $e) {
     error_log('Request reset error: ' . $e->getMessage());
     $response['success'] = false;
-    $response['message'] = 'Unable to send reset link right now. Please try again later.';
+    $response['message'] = passwordResetSanitizeExceptionMessage($e);
 }
 
 echo json_encode($response);

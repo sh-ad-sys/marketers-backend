@@ -25,9 +25,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
-    $db = mongoDb();
-    ensurePasswordResetTable($db);
-
     $data = json_decode(file_get_contents('php://input'), true);
     $type = trim($data['type'] ?? '');
     $email = trim($data['email'] ?? '');
@@ -58,18 +55,47 @@ try {
         exit;
     }
 
-    $rows = $db->password_resets->find([
-        'user_type' => $type,
-        'email' => $email,
-        'used_at' => null,
-        'expires_at' => ['$gte' => mongoNow()],
-    ], ['sort' => ['_id' => -1], 'limit' => 10]);
-
     $validReset = null;
-    foreach ($rows as $row) {
-        if (password_verify($token, (string)($row['token_hash'] ?? ''))) {
-            $validReset = $row;
-            break;
+
+    if (passwordResetUsesMongoStorage()) {
+        $db = mongoDb();
+        ensurePasswordResetTable($db);
+
+        $rows = $db->password_resets->find([
+            'user_type' => $type,
+            'email' => $email,
+            'used_at' => null,
+            'expires_at' => ['$gte' => mongoNow()],
+        ], ['sort' => ['_id' => -1], 'limit' => 10]);
+
+        foreach ($rows as $row) {
+            if (password_verify($token, (string)($row['token_hash'] ?? ''))) {
+                $validReset = $row;
+                break;
+            }
+        }
+    } else {
+        $conn = apiMysql();
+        ensurePasswordResetTable($conn);
+
+        $stmt = $conn->prepare('
+            SELECT id, user_id, token_hash
+            FROM password_resets
+            WHERE user_type = ?
+              AND email = ?
+              AND used_at IS NULL
+              AND expires_at >= NOW()
+            ORDER BY id DESC
+            LIMIT 10
+        ');
+        $stmt->execute([$type, $email]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $row) {
+            if (password_verify($token, (string)($row['token_hash'] ?? ''))) {
+                $validReset = $row;
+                break;
+            }
         }
     }
 
@@ -80,22 +106,40 @@ try {
     }
 
     $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
-    $userId = normalizeId($validReset['user_id'] ?? 0);
 
-    if ($type === 'admin') {
-        $db->admins->updateOne(['_id' => $userId, 'email' => $email], ['$set' => ['password' => $newHash]]);
+    if (passwordResetUsesMongoStorage()) {
+        $db = isset($db) ? $db : mongoDb();
+        $userId = normalizeId($validReset['user_id'] ?? 0);
+
+        if ($type === 'admin') {
+            $db->admins->updateOne(['_id' => $userId, 'email' => $email], ['$set' => ['password' => $newHash]]);
+        } else {
+            $db->marketers->updateOne(['_id' => $userId, 'email' => $email], ['$set' => ['password' => $newHash, 'must_change_password' => 0]]);
+        }
+
+        $db->password_resets->updateOne(['_id' => normalizeId($validReset['_id'] ?? 0)], ['$set' => ['used_at' => mongoNow()]]);
     } else {
-        $db->marketers->updateOne(['_id' => $userId, 'email' => $email], ['$set' => ['password' => $newHash, 'must_change_password' => 0]]);
-    }
+        $conn = isset($conn) ? $conn : apiMysql();
+        $userId = (int)($validReset['user_id'] ?? 0);
 
-    $db->password_resets->updateOne(['_id' => normalizeId($validReset['_id'] ?? 0)], ['$set' => ['used_at' => mongoNow()]]);
+        if ($type === 'admin') {
+            $updateUser = $conn->prepare('UPDATE admins SET password = ? WHERE id = ? AND email = ?');
+            $updateUser->execute([$newHash, $userId, $email]);
+        } else {
+            $updateUser = $conn->prepare('UPDATE marketers SET password = ?, must_change_password = 0 WHERE id = ? AND email = ?');
+            $updateUser->execute([$newHash, $userId, $email]);
+        }
+
+        $markUsed = $conn->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?');
+        $markUsed->execute([(int)($validReset['id'] ?? 0)]);
+    }
 
     $response['success'] = true;
     $response['message'] = 'Password reset successful. Please login.';
 } catch (Throwable $e) {
     error_log('Reset password error: ' . $e->getMessage());
     $response['success'] = false;
-    $response['message'] = 'Unable to reset password. Please request a new link.';
+    $response['message'] = passwordResetSanitizeExceptionMessage($e);
 }
 
 echo json_encode($response);
