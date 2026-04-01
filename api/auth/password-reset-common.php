@@ -1,13 +1,20 @@
 <?php
 /**
- * Password reset helpers for MongoDB backend.
+ * Password reset helpers shared by both MongoDB and MySQL backends.
  */
 
-require_once __DIR__ . '/../mongo/config.php';
+require_once __DIR__ . '/../shared/storage.php';
+require_once __DIR__ . '/../shared/admin-portals.php';
 
 function loadEnvValue($key, $default = '')
 {
-    return envOrDefault($key, $default);
+    $value = $_ENV[$key] ?? getenv($key);
+    if ($value === false || $value === null) {
+        return $default;
+    }
+
+    $value = trim((string)$value);
+    return $value !== '' ? $value : $default;
 }
 
 function randomToken($length = 64)
@@ -15,18 +22,137 @@ function randomToken($length = 64)
     return bin2hex(random_bytes($length / 2));
 }
 
-function ensurePasswordResetTable($db)
+function passwordResetUsesMongoStorage(): bool
 {
-    // Kept name for compatibility with existing calls.
-    $db->password_resets->createIndex(['email' => 1, 'user_type' => 1]);
-    $db->password_resets->createIndex(['expires_at' => 1]);
-    $db->password_resets->createIndex(['used_at' => 1]);
+    return function_exists('apiUsesMongoStorage') ? apiUsesMongoStorage() : false;
+}
+
+function ensurePasswordResetTable($storage)
+{
+    if ($storage instanceof PDO) {
+        $storage->exec('
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_type VARCHAR(20) NOT NULL,
+                admin_portal VARCHAR(20) DEFAULT NULL,
+                user_id INT NOT NULL,
+                email VARCHAR(191) NOT NULL,
+                token_hash VARCHAR(255) NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used_at DATETIME DEFAULT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_password_resets_email_type (email, user_type),
+                INDEX idx_password_resets_portal (user_type, admin_portal),
+                INDEX idx_password_resets_expires_at (expires_at),
+                INDEX idx_password_resets_used_at (used_at),
+                INDEX idx_password_resets_user (user_type, user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ');
+
+        if (function_exists('apiTableHasColumn') && !apiTableHasColumn($storage, 'password_resets', 'admin_portal')) {
+            $storage->exec("
+                ALTER TABLE password_resets
+                ADD COLUMN admin_portal VARCHAR(20) DEFAULT NULL AFTER user_type
+            ");
+
+            if (function_exists('apiRefreshTableColumns')) {
+                apiRefreshTableColumns($storage, 'password_resets');
+            }
+        }
+
+        return;
+    }
+
+    // MongoDB backend keeps the collection name for compatibility.
+    $storage->password_resets->createIndex(['email' => 1, 'user_type' => 1]);
+    $storage->password_resets->createIndex(['user_type' => 1, 'admin_portal' => 1]);
+    $storage->password_resets->createIndex(['expires_at' => 1]);
+    $storage->password_resets->createIndex(['used_at' => 1]);
 }
 
 function nextResetId($collection)
 {
     $last = $collection->findOne([], ['sort' => ['_id' => -1], 'projection' => ['_id' => 1]]);
     return $last ? (normalizeId($last['_id']) + 1) : 1;
+}
+
+function passwordResetNormalizeBaseUrl(string $value): string
+{
+    $value = rtrim(trim($value), '/');
+    if ($value === '') {
+        return '';
+    }
+
+    $path = (string)(parse_url($value, PHP_URL_PATH) ?? '');
+    if ($path === '' || $path === '/') {
+        return $value . '/reset-password';
+    }
+
+    return $value;
+}
+
+function passwordResetResolveBaseUrl(string $type, string $portal = ''): string
+{
+    $normalizedPortal = $type === 'admin' && function_exists('normalizeAdminPortal')
+        ? normalizeAdminPortal($portal)
+        : '';
+    $specificKey = $type === 'admin'
+        ? ($normalizedPortal === 'ledger' ? 'RESET_LEDGER_URL' : 'RESET_ADMIN_URL')
+        : 'RESET_USER_URL';
+    $configured = passwordResetNormalizeBaseUrl(loadEnvValue($specificKey, ''));
+    if ($configured !== '') {
+        return $configured;
+    }
+
+    $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+    if ($origin !== '' && filter_var($origin, FILTER_VALIDATE_URL)) {
+        return passwordResetNormalizeBaseUrl($origin);
+    }
+
+    $fallback = $type === 'admin'
+        ? ($normalizedPortal === 'ledger' ? 'http://localhost:3004/reset-password' : 'http://localhost:3001/reset-password')
+        : 'http://localhost:3000/reset-password';
+
+    return $fallback;
+}
+
+function passwordResetSanitizeExceptionMessage(Throwable $e): string
+{
+    $message = trim($e->getMessage());
+
+    if ($message === '') {
+        return 'Password reset failed on the server. Please try again later.';
+    }
+
+    if (stripos($message, 'SMTP is not configured') !== false) {
+        return 'Password reset email is not configured on the server. Set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS.';
+    }
+
+    if (
+        stripos($message, 'SMTP connection failed') !== false
+        || stripos($message, 'Unable to start TLS encryption') !== false
+        || stripos($message, 'SMTP error on command') !== false
+    ) {
+        return 'Password reset email could not be sent. Check the SMTP server, credentials, and encryption settings.';
+    }
+
+    if (
+        stripos($message, 'No suitable servers found') !== false
+        || stripos($message, 'serverSelectionTryOnce') !== false
+        || stripos($message, 'TLS handshake failed') !== false
+    ) {
+        return 'Password reset could not reach the database. Check the MongoDB connection and network access list.';
+    }
+
+    if (stripos($message, 'MongoDB backend is not available') !== false) {
+        return 'Password reset needs MongoDB on this server, but the MongoDB extension or Composer package is missing.';
+    }
+
+    if (stripos($message, 'Database connection failed') !== false) {
+        return 'Password reset could not reach the database. Check the MySQL connection settings.';
+    }
+
+    return 'Password reset failed: ' . $message;
 }
 
 function smtpSendMail($toEmail, $subject, $htmlBody, $textBody = '')
@@ -37,7 +163,7 @@ function smtpSendMail($toEmail, $subject, $htmlBody, $textBody = '')
     $password = loadEnvValue('SMTP_PASS', '');
     $fromEmail = loadEnvValue('SMTP_FROM_EMAIL', $username ?: 'no-reply@plotconnect.local');
     $fromName = loadEnvValue('SMTP_FROM_NAME', 'PlotConnect');
-    $secure = strtolower(loadEnvValue('SMTP_SECURE', 'tls')); // tls|ssl|none
+    $secure = strtolower(loadEnvValue('SMTP_SECURE', 'tls'));
 
     if (!$host || !$port || !$username || !$password) {
         throw new Exception('SMTP is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');

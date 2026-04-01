@@ -1,6 +1,6 @@
 <?php
 /**
- * Marketer Change Password API (MongoDB)
+ * Marketer Change Password API
  */
 
 header('Content-Type: application/json');
@@ -13,8 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-require_once __DIR__ . '/../mongo/config.php';
-ensureSession();
+require_once __DIR__ . '/../shared/storage.php';
+apiEnsureSessionStarted();
 
 $response = ['success' => false, 'message' => ''];
 
@@ -26,9 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
-    $db = mongoDb();
-
-    $data = json_decode(file_get_contents('php://input'), true);
+    $data = apiJsonInput();
     $currentPassword = (string)($data['current_password'] ?? '');
     $newPassword = (string)($data['new_password'] ?? '');
 
@@ -44,34 +42,69 @@ try {
         exit;
     }
 
-    $marketerId = isset($_SERVER['HTTP_X_AUTH_MARKETER_ID']) ? (int)$_SERVER['HTTP_X_AUTH_MARKETER_ID'] : 0;
-    if ($marketerId <= 0 && isset($_SESSION['marketer_id'])) {
-        $marketerId = normalizeId($_SESSION['marketer_id']);
+    if (apiUsesMongoStorage()) {
+        require_once __DIR__ . '/../mongo/config.php';
+        ensureSession();
+
+        $db = mongoDb();
+        $marketerId = isset($_SERVER['HTTP_X_AUTH_MARKETER_ID']) ? (int)$_SERVER['HTTP_X_AUTH_MARKETER_ID'] : 0;
+        if ($marketerId <= 0 && isset($_SESSION['marketer_id'])) {
+            $marketerId = normalizeId($_SESSION['marketer_id']);
+        }
+
+        if ($marketerId <= 0) {
+            $response['message'] = 'Authentication required';
+            echo json_encode($response);
+            exit;
+        }
+
+        $marketer = $db->marketers->findOne(['_id' => $marketerId], ['projection' => ['password' => 1]]);
+        if (!$marketer) {
+            $response['message'] = 'Marketer account not found';
+            echo json_encode($response);
+            exit;
+        }
+
+        if (!password_verify($currentPassword, (string)($marketer['password'] ?? ''))) {
+            $response['message'] = 'Temporary/current password is incorrect';
+            echo json_encode($response);
+            exit;
+        }
+
+        $db->marketers->updateOne(
+            ['_id' => $marketerId],
+            ['$set' => ['password' => password_hash($newPassword, PASSWORD_DEFAULT), 'must_change_password' => 0]]
+        );
+
+        echo json_encode(['success' => true, 'message' => 'Password changed successfully']);
+        exit;
     }
 
+    $conn = apiMysql();
+    $marketerId = apiResolveMySqlMarketerId($conn);
     if ($marketerId <= 0) {
         $response['message'] = 'Authentication required';
         echo json_encode($response);
         exit;
     }
 
-    $marketer = $db->marketers->findOne(['_id' => $marketerId], ['projection' => ['password' => 1]]);
+    $stmt = $conn->prepare('SELECT password FROM marketers WHERE id = ? LIMIT 1');
+    $stmt->execute([$marketerId]);
+    $marketer = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$marketer) {
         $response['message'] = 'Marketer account not found';
         echo json_encode($response);
         exit;
     }
 
-    if (!password_verify($currentPassword, (string)($marketer['password'] ?? ''))) {
+    if (!password_verify($currentPassword, (string)$marketer['password'])) {
         $response['message'] = 'Temporary/current password is incorrect';
         echo json_encode($response);
         exit;
     }
 
-    $db->marketers->updateOne(
-        ['_id' => $marketerId],
-        ['$set' => ['password' => password_hash($newPassword, PASSWORD_DEFAULT), 'must_change_password' => 0]]
-    );
+    $stmt = $conn->prepare('UPDATE marketers SET password = ?, must_change_password = 0 WHERE id = ?');
+    $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), $marketerId]);
 
     $response['success'] = true;
     $response['message'] = 'Password changed successfully';

@@ -1,6 +1,6 @@
 <?php
 /**
- * Admin Dashboard API (MongoDB)
+ * Admin Dashboard API
  */
 
 header('Content-Type: application/json');
@@ -13,33 +13,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-require_once __DIR__ . '/../mongo/config.php';
+require_once __DIR__ . '/../shared/storage.php';
 
 $response = ['success' => false, 'message' => '', 'data' => []];
 
 try {
-    $role = $_SERVER['HTTP_X_AUTH_ROLE'] ?? '';
-    if ($role !== 'admin') {
+    if (!isAdminLoggedIn()) {
         $response['message'] = 'Admin access required';
         echo json_encode($response);
         exit;
     }
 
-    $db = mongoDb();
+    if (apiUsesMongoStorage()) {
+        require_once __DIR__ . '/../mongo/config.php';
 
-    $totalMarketers = $db->marketers->countDocuments();
-    $totalProperties = $db->properties->countDocuments();
-    $pendingProperties = $db->properties->countDocuments(['status' => 'pending']);
-    $approvedProperties = $db->properties->countDocuments(['status' => 'approved']);
-    $rejectedProperties = $db->properties->countDocuments(['status' => 'rejected']);
+        $db = mongoDb();
+        $response['success'] = true;
+        $response['data'] = [
+            'total_marketers' => (int)$db->marketers->countDocuments(),
+            'total_properties' => (int)$db->properties->countDocuments(),
+            'pending_properties' => (int)$db->properties->countDocuments(['status' => 'pending']),
+            'approved_properties' => (int)$db->properties->countDocuments(['status' => 'approved']),
+            'rejected_properties' => (int)$db->properties->countDocuments(['status' => 'rejected']),
+        ];
 
+        echo json_encode($response);
+        exit;
+    }
+
+    $conn = apiMysql();
     $response['success'] = true;
     $response['data'] = [
-        'total_marketers' => (int)$totalMarketers,
-        'total_properties' => (int)$totalProperties,
-        'pending_properties' => (int)$pendingProperties,
-        'approved_properties' => (int)$approvedProperties,
-        'rejected_properties' => (int)$rejectedProperties,
+        'total_marketers' => (int)$conn->query('SELECT COUNT(*) FROM marketers')->fetchColumn(),
+        'total_properties' => (int)$conn->query('SELECT COUNT(*) FROM properties')->fetchColumn(),
+        'pending_properties' => (int)$conn->query("SELECT COUNT(*) FROM properties WHERE status = 'pending'")->fetchColumn(),
+        'approved_properties' => (int)$conn->query("SELECT COUNT(*) FROM properties WHERE status = 'approved'")->fetchColumn(),
+        'rejected_properties' => (int)$conn->query("SELECT COUNT(*) FROM properties WHERE status = 'rejected'")->fetchColumn(),
     ];
 } catch (Throwable $e) {
     $response['message'] = 'Database error: ' . $e->getMessage();
