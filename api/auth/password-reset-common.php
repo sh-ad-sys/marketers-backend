@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/../mongo/config.php';
+require_once __DIR__ . '/../shared/admin-auth.php';
 
 function loadEnvValue($key, $default = '')
 {
@@ -19,6 +20,7 @@ function ensurePasswordResetTable($db)
 {
     // Kept name for compatibility with existing calls.
     $db->password_resets->createIndex(['email' => 1, 'user_type' => 1]);
+    $db->password_resets->createIndex(['user_type' => 1, 'admin_portal' => 1]);
     $db->password_resets->createIndex(['expires_at' => 1]);
     $db->password_resets->createIndex(['used_at' => 1]);
 }
@@ -27,6 +29,53 @@ function nextResetId($collection)
 {
     $last = $collection->findOne([], ['sort' => ['_id' => -1], 'projection' => ['_id' => 1]]);
     return $last ? (normalizeId($last['_id']) + 1) : 1;
+}
+
+function passwordResetNormalizeBaseUrl(string $value): string
+{
+    $value = rtrim(trim($value), '/');
+    if ($value === '') {
+        return '';
+    }
+
+    $path = (string)(parse_url($value, PHP_URL_PATH) ?? '');
+    if ($path === '' || $path === '/') {
+        return $value . '/reset-password';
+    }
+
+    return $value;
+}
+
+function passwordResetResolveBaseUrl(string $type, string $portal = ''): string
+{
+    $normalizedPortal = $type === 'admin' ? normalizeAdminPortal($portal) : '';
+    $specificKey = $type === 'admin'
+        ? ($normalizedPortal === 'ledger' ? 'RESET_LEDGER_URL' : 'RESET_ADMIN_URL')
+        : 'RESET_USER_URL';
+
+    $configured = passwordResetNormalizeBaseUrl(loadEnvValue($specificKey, ''));
+    if ($configured !== '') {
+        return $configured;
+    }
+
+    $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+    if ($origin !== '' && filter_var($origin, FILTER_VALIDATE_URL)) {
+        return passwordResetNormalizeBaseUrl($origin);
+    }
+
+    if ($type === 'admin' && $normalizedPortal === 'ledger') {
+        return 'http://localhost:3004/reset-password';
+    }
+
+    return $type === 'admin'
+        ? 'http://localhost:3001/reset-password'
+        : 'http://localhost:3000/reset-password';
+}
+
+function passwordResetErrorMessage(Throwable $e, string $fallback): string
+{
+    $message = trim($e->getMessage());
+    return $message !== '' ? $fallback . ': ' . $message : $fallback;
 }
 
 function smtpSendMail($toEmail, $subject, $htmlBody, $textBody = '')

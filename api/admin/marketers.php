@@ -6,7 +6,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, X-Auth-Portal');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -58,6 +58,8 @@ try {
                 'is_authorized' => isset($doc['is_authorized']) ? (int)$doc['is_authorized'] : 0,
                 'is_blocked' => isset($doc['is_blocked']) ? (int)$doc['is_blocked'] : 0,
                 'must_change_password' => isset($doc['must_change_password']) ? (int)$doc['must_change_password'] : 0,
+                'failed_login_attempts' => isset($doc['failed_login_attempts']) ? (int)$doc['failed_login_attempts'] : 0,
+                'lock_reason' => (string)($doc['lock_reason'] ?? ''),
                 'created_at' => mongoDateToString($doc['created_at'] ?? null),
             ];
         }
@@ -95,13 +97,13 @@ try {
 
         $set = [];
         if ($action === 'authorize') {
-            $set = ['is_authorized' => 1, 'is_blocked' => 0];
+            $set = ['is_authorized' => 1, 'is_blocked' => 0, 'failed_login_attempts' => 0, 'lock_reason' => null, 'locked_at' => null];
         } elseif ($action === 'reject') {
             $set = ['is_authorized' => 0];
         } elseif ($action === 'block') {
-            $set = ['is_blocked' => 1, 'is_authorized' => 0];
+            $set = ['is_blocked' => 1, 'is_authorized' => 0, 'lock_reason' => 'admin', 'locked_at' => mongoNow()];
         } elseif ($action === 'unblock') {
-            $set = ['is_blocked' => 0];
+            $set = ['is_blocked' => 0, 'failed_login_attempts' => 0, 'lock_reason' => null, 'locked_at' => null];
         }
 
         $collection->updateOne(['_id' => $id], ['$set' => $set]);

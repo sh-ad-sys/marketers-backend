@@ -6,7 +6,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Role, X-Auth-User, X-Auth-Marketer-Id, X-Auth-Portal');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -28,9 +28,10 @@ try {
     $db = mongoDb();
     ensurePasswordResetTable($db);
 
-    $data = json_decode(file_get_contents('php://input'), true);
-    $type = trim($data['type'] ?? '');
-    $email = trim($data['email'] ?? '');
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $type = trim((string)($data['type'] ?? ''));
+    $email = trim((string)($data['email'] ?? ''));
+    $portal = $type === 'admin' ? currentAdminPortal($data) : '';
 
     if (!in_array($type, ['admin', 'marketer'], true)) {
         $response['message'] = 'Invalid account type';
@@ -38,29 +39,63 @@ try {
         exit;
     }
 
-    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $response['message'] = 'Valid email is required';
         echo json_encode($response);
         exit;
     }
 
-    $collection = $type === 'admin' ? $db->admins : $db->marketers;
-    $user = $collection->findOne(['email' => $email]);
+    if ($type === 'admin') {
+        if ($portal === 'ledger') {
+            ensureConfiguredAdminAccount('ledger');
+            $user = findAdminByPortal('ledger');
+            if (!$user || strcasecmp((string)($user['email'] ?? ''), $email) !== 0) {
+                $response['success'] = false;
+                $response['message'] = 'Email does not match any ledger account.';
+                echo json_encode($response);
+                exit;
+            }
+        } else {
+            if (strcasecmp((string)(adminPortalProfile('admin')['email'] ?? ''), $email) === 0) {
+                ensureConfiguredAdminAccount('admin');
+            }
 
-    if (!$user) {
-        $response['success'] = false;
-        $response['message'] = 'Email does not match any ' . $type . ' account.';
-        echo json_encode($response);
-        exit;
+            $user = findAdminByEmail($email, 'admin');
+            if (!$user) {
+                $response['success'] = false;
+                $response['message'] = 'Email does not match any admin account.';
+                echo json_encode($response);
+                exit;
+            }
+        }
+
+        $userId = normalizeId($user['_id'] ?? $user['id'] ?? 0);
+        $displayName = (string)($user['full_name'] ?? $user['username'] ?? 'Administrator');
+    } else {
+        $user = $db->marketers->findOne(['email' => $email]);
+        if (!$user) {
+            $response['success'] = false;
+            $response['message'] = 'Email does not match any marketer account.';
+            echo json_encode($response);
+            exit;
+        }
+
+        $user = adminDocumentToArray($user) ?: [];
+        $userId = normalizeId($user['_id'] ?? $user['id'] ?? 0);
+        $displayName = (string)($user['name'] ?? 'User');
     }
 
-    $userId = normalizeId($user['_id'] ?? 0);
     $token = randomToken(64);
     $tokenHash = password_hash($token, PASSWORD_DEFAULT);
     $expiresAt = new MongoDB\BSON\UTCDateTime((time() + 1800) * 1000);
 
     $db->password_resets->updateMany(
-        ['user_type' => $type, 'user_id' => $userId, 'used_at' => null],
+        [
+            'user_type' => $type,
+            'admin_portal' => $type === 'admin' ? $portal : null,
+            'user_id' => $userId,
+            'used_at' => null,
+        ],
         ['$set' => ['used_at' => mongoNow()]]
     );
 
@@ -68,6 +103,7 @@ try {
     $db->password_resets->insertOne([
         '_id' => $resetId,
         'user_type' => $type,
+        'admin_portal' => $type === 'admin' ? $portal : null,
         'user_id' => $userId,
         'email' => $email,
         'token_hash' => $tokenHash,
@@ -76,13 +112,12 @@ try {
         'created_at' => mongoNow(),
     ]);
 
-    $adminResetBase = rtrim(loadEnvValue('RESET_ADMIN_URL', 'http://localhost:3001/reset-password'), '/');
-    $userResetBase = rtrim(loadEnvValue('RESET_USER_URL', 'http://localhost:3000/reset-password'), '/');
-    $base = $type === 'admin' ? $adminResetBase : $userResetBase;
-
+    $base = passwordResetResolveBaseUrl($type, $portal);
     $resetLink = $base . '?token=' . urlencode($token) . '&email=' . urlencode($email) . '&type=' . urlencode($type);
+    if ($type === 'admin' && $portal !== '') {
+        $resetLink .= '&portal=' . urlencode($portal);
+    }
 
-    $displayName = (string)($user['name'] ?? $user['full_name'] ?? 'User');
     $subject = 'PlotConnect Password Reset';
     $html = '<p>Hello ' . htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8') . ',</p>'
       . '<p>You requested a password reset. Click the link below to set a new password:</p>'
@@ -98,7 +133,7 @@ try {
 } catch (Throwable $e) {
     error_log('Request reset error: ' . $e->getMessage());
     $response['success'] = false;
-    $response['message'] = 'Unable to send reset link right now. Please try again later.';
+    $response['message'] = passwordResetErrorMessage($e, 'Unable to send reset link right now. Please try again later.');
 }
 
 echo json_encode($response);
